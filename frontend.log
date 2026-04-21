@@ -1,0 +1,62 @@
+
+> topview-logger@10.0.0 dev
+> vite
+
+
+  VITE v8.0.8  ready in 801 ms
+
+  ➜  Local:   http://localhost:5175/
+  ➜  Network: use --host to expose
+10:03:31 PM [vite] (client) hmr update /styles.css?direct, /styles.css
+10:05:58 PM [vite] (client) hmr update /styles.css?direct, /styles.css
+10:07:50 PM [vite] (client) hmr update /styles.css?direct, /styles.css
+10:12:38 PM [vite] (client) page reload index.html
+10:29:55 PM [vite] (client) page reload migration_stage/index.html
+10:29:59 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+10:29:59 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+10:29:59 PM [vite] (client) page reload migration_stage/ios/App/App/public/index.html
+10:32:50 PM [vite] (client) page reload migration_stage/index.html
+10:32:53 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+10:32:53 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+10:32:53 PM [vite] (client) page reload migration_stage/ios/App/App/public/index.html
+10:32:58 PM [vite] (client) page reload migration_stage/index.html
+10:32:59 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+10:32:59 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+10:32:59 PM [vite] (client) page reload migration_stage/ios/App/App/public/index.html
+10:32:59 PM [vite] (client) page reload migration_stage/index.html
+10:33:01 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+10:33:01 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+10:33:01 PM [vite] (client) page reload migration_stage/ios/App/App/public/index.html
+10:35:24 PM [vite] (client) page reload migration_stage/index.html
+10:35:24 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+10:35:24 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+10:35:24 PM [vite] (client) page reload migration_stage/ios/App/App/public/index.html
+10:36:08 PM [vite] (client) page reload migration_stage/index.html
+10:36:08 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+10:36:10 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+10:36:17 PM [vite] (client) page reload migration_stage/index.html
+10:36:18 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+10:36:18 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+10:36:55 PM [vite] (client) page reload migration_stage/index.html
+10:36:55 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+10:36:56 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+10:36:58 PM [vite] (client) page reload migration_stage/index.html
+10:36:59 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+10:36:59 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+10:44:06 PM [vite] (client) page reload app.js
+10:45:22 PM [vite] (client) page reload app.js
+10:59:41 PM [vite] (client) page reload app.js
+11:04:27 PM [vite] (client) page reload app.js
+11:05:14 PM [vite] (client) page reload migration_stage/index.html
+11:05:14 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+11:05:16 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+11:05:17 PM [vite] (client) page reload migration_stage/index.html
+11:05:18 PM [vite] (client) page reload migration_stage/server/reservations_dump.html
+11:05:18 PM [vite] (client) page reload migration_stage/server/cheerio_dump.html
+11:09:21 PM [vite] (client) page reload post_dump.html
+11:09:21 PM [vite] (client) page reload post_dump2.html
+11:09:21 PM [vite] (client) page reload proxy_dump.html
+11:09:21 PM [vite] (client) page reload test_preview.html
+11:09:21 PM [vite] (client) page reload app.js
+11:09:21 PM [vite] (client) page reload server/cheerio_dump.html
+11:09:26 PM [vite] (client) page reload server/reservations_dump.html
