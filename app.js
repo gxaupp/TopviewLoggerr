@@ -270,14 +270,31 @@ document.getElementById('btn-experiment').addEventListener('click', () => {
   countifResetDashboard();
 });
 
-const COUNTIF_PROXY_URL = (() => {
-  const host = window.location.hostname;
-  if (host === 'localhost' || host === '127.0.0.1') {
-    return 'http://localhost:3001';
-  }
-  // For production, proxy runs on same host or configure your deployed URL here
-  return 'http://localhost:3001';
-})();
+const COUNTIF_PROXY_URL = 'https://topviewloggerr.onrender.com';
+
+/**
+ * Robust XHR helper to bypass fetch-only security blocks on mobile
+ */
+function xhrProxyRequest(url, method, body = null) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)); } catch(e) { resolve({success:true}); }
+      } else {
+        const err = new Error(`HTTP ${xhr.status}`);
+        try { err.data = JSON.parse(xhr.responseText); } catch(e) {}
+        reject(err);
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network/CORS block'));
+    xhr.timeout = 30000;
+    xhr.ontimeout = () => reject(new Error('Connection timed out (Waking up server?)'));
+    xhr.send(body ? JSON.stringify(body) : null);
+  });
+}
 
 function countifResetDashboard() {
   const steps = document.querySelectorAll('.countif-step');
@@ -355,8 +372,7 @@ async function fetchDispatchData(contextLabel = 'Data') {
   syncProgress.classList.add('sync-anim');
 
   try {
-    const response = await fetch(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}`);
-    const result = await response.json();
+    const result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}`, 'GET');
 
     if (result.success) {
       portalData = (result.data || []).reverse();
@@ -554,16 +570,10 @@ document.getElementById('btn-countif-connect').addEventListener('click', async (
     // Simulate brief delay for visual feedback before the actual POST
     await new Promise(r => setTimeout(r, 400));
     
-    const response = await fetch(`${COUNTIF_PROXY_URL}/api/countif/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: 'fvazquez',
-        password: 'Topview12345'
-      })
+    const data = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/login`, 'POST', {
+      username: 'fvazquez',
+      password: 'Topview12345'
     });
-    
-    const data = await response.json();
     
     // Animate through the stages the server reported
     if (data.stages && data.stages.length > 0) {
