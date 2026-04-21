@@ -1,0 +1,66 @@
+name: Stable v10
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Web Assets
+        run: npm run build
+
+      - name: Initialize & Sync Capacitor
+        run: |
+          npx cap sync ios
+
+      - name: Resolve Swift Packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release
+
+      - name: Build iOS xcarchive
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath $PWD/build/App.xcarchive \
+            clean archive \
+            -allowProvisioningUpdates \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      - name: Package Unsigned IPA (Sideload Ready)
+        run: |
+          mkdir -p build/export/Payload
+          APP_PATH=$(find build/App.xcarchive -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then echo "Error: .app not found"; exit 1; fi
+          cp -r "$APP_PATH" build/export/Payload/
+          cd build/export
+          zip -r TopviewLogger.ipa Payload
+          rm -rf Payload
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TopviewLogger-Stable-v10-IPA
+          path: build/export/TopviewLogger.ipa
