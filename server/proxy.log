@@ -1,0 +1,3 @@
+[CountIf Proxy] Online at http://localhost:3001
+[CountIf Proxy] POST /api/countif/login
+[CountIf Proxy] GET  /api/health

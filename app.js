@@ -1,0 +1,1566 @@
+/* ============================================================
+   TOPVIEW LOGGER — Combined App JavaScript
+   ============================================================ */
+
+// ===== STATE =====
+const State = {
+  currentUser: null,
+  activeModule: null, // 'sw' or 'fl'
+  // Stopwatch state
+  sw: {
+    session: { inspector:'', supervisor:'', stopNum:'', startTime:null, endTime:null, violations:[] },
+    editingViolationIndex: null,
+    editingSavedReportIndex: null,
+    savedReports: []
+  },
+  // Full Loop state
+  fl: {
+    session: { inspector:'', busNumber:'', driverName:'', route:'', stopBoarded:'', startTime:null, endTime:null, violations:[] },
+    editingViolationIndex: null,
+    editingSavedReportIndex: null,
+    savedReports: [],
+    drivers: [] // {driverName, lastReportDate}
+  },
+  timePickerCallback: null
+};
+
+// ===== STORAGE KEYS =====
+const KEYS = {
+  USER: 'tv_user',
+  SW_SESSION: 'tv_sw_session',
+  SW_REPORTS: 'tv_sw_reports',
+  FL_SESSION: 'tv_fl_session',
+  FL_REPORTS: 'tv_fl_reports',
+  FL_DRIVERS: 'tv_fl_drivers'
+};
+
+// ===== HELPERS =====
+const formatTime = (d = new Date()) => d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', hour12:true });
+const timeToMinutes = (s) => {
+  if (!s) return 0;
+  const p = s.trim().split(' ');
+  if (p.length < 2) return 0;
+  let [h, m] = p[0].split(':').map(Number);
+  if (p[1] === 'PM' && h < 12) h += 12;
+  if (p[1] === 'AM' && h === 12) h = 0;
+  return h * 60 + m;
+};
+const stripAmPm = (s) => s ? s.replace(/\s*(AM|PM)/gi, '') : '';
+const daysBetween = (d1, d2) => Math.floor(Math.abs(d2-d1) / (1000*60*60*24));
+
+// ===== VIEW NAVIGATION =====
+const views = {};
+document.querySelectorAll('.view').forEach(v => { views[v.id.replace('-view','')] = v; });
+
+let viewHistory = ['login']; // track navigation stack
+
+function showView(targetId) {
+  const currentView = document.querySelector('.view.active');
+  const targetView = views[targetId];
+
+  if (!targetView || currentView === targetView) return;
+
+  const isBack = viewHistory.length > 1 && viewHistory[viewHistory.length - 2] === targetId;
+
+  if (isBack) {
+    // Going backward (pop)
+    viewHistory.pop();
+    targetView.classList.remove('next');
+    void targetView.offsetWidth; // Force layout
+    targetView.classList.add('active');
+
+    if (currentView) {
+      currentView.classList.remove('active');
+      currentView.classList.add('next'); // Push current to right
+    }
+  } else {
+    // Going forward (push)
+    if (viewHistory[viewHistory.length - 1] !== targetId) {
+      viewHistory.push(targetId);
+    }
+    targetView.classList.add('next'); // Start target on right
+    void targetView.offsetWidth; // Force layout
+    targetView.classList.remove('next');
+    targetView.classList.add('active'); // Slide target in
+
+    if (currentView) {
+      currentView.classList.remove('active');
+      currentView.classList.remove('next'); // Push current to left/back
+    }
+  }
+  
+  if (targetId === 'sw-dashboard') checkSwResume();
+  if (targetId === 'fl-dashboard') checkFlResume();
+}
+
+// Back buttons
+document.querySelectorAll('.btn-back').forEach(btn => {
+  btn.addEventListener('click', () => showView(btn.dataset.target));
+});
+
+// ===== TIME PICKER (Scroll Dial — Fixed) =====
+const pickerHourCol = document.getElementById('picker-hour-col');
+const pickerMinCol = document.getElementById('picker-minute-col');
+const pickerAmpmCol = document.getElementById('picker-ampm-col');
+const pickerModal = document.getElementById('time-picker-modal');
+
+function initTimePicker() {
+  // Build hour options 1-12
+  for (let h = 1; h <= 12; h++) {
+    const d = document.createElement('div');
+    d.className = 'time-option'; d.dataset.val = h.toString(); d.textContent = h;
+    d.addEventListener('click', () => snapToOption(pickerHourCol, d));
+    pickerHourCol.appendChild(d);
+  }
+  // Build minute options 00-59
+  for (let m = 0; m < 60; m++) {
+    const d = document.createElement('div');
+    d.className = 'time-option';
+    const ms = m.toString().padStart(2, '0');
+    d.dataset.val = ms; d.textContent = ms;
+    d.addEventListener('click', () => snapToOption(pickerMinCol, d));
+    pickerMinCol.appendChild(d);
+  }
+  // AM/PM click
+  pickerAmpmCol.querySelectorAll('.time-option').forEach(opt => {
+    opt.addEventListener('click', () => snapToOption(pickerAmpmCol, opt));
+  });
+
+  // Scroll-based selection with RAF debounce
+  [pickerHourCol, pickerMinCol, pickerAmpmCol].forEach(col => {
+    let rafId = null;
+    col.addEventListener('scroll', () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => highlightCenter(col));
+    }, { passive: true });
+  });
+}
+
+function highlightCenter(col) {
+  const center = col.scrollTop + col.clientHeight / 2;
+  let closest = null, minDist = Infinity;
+  col.querySelectorAll('.time-option').forEach(opt => {
+    const optCenter = opt.offsetTop + opt.offsetHeight / 2;
+    const dist = Math.abs(optCenter - center);
+    if (dist < minDist) { minDist = dist; closest = opt; }
+  });
+  if (closest) {
+    col.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+    closest.classList.add('selected');
+  }
+}
+
+function snapToOption(col, opt) {
+  col.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+  opt.classList.add('selected');
+  const scrollTarget = opt.offsetTop - col.clientHeight / 2 + opt.offsetHeight / 2;
+  col.scrollTo({ top: scrollTarget, behavior: 'smooth' });
+}
+
+function scrollToVal(col, val) {
+  const opt = Array.from(col.querySelectorAll('.time-option')).find(o => o.dataset.val == val);
+  if (opt) {
+    // Clear old selection
+    col.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+    opt.classList.add('selected');
+    // Instant snap on open (no smooth — instant positioning)
+    const scrollTarget = opt.offsetTop - col.clientHeight / 2 + opt.offsetHeight / 2;
+    setTimeout(() => col.scrollTo({ top: scrollTarget, behavior: 'instant' }), 30);
+  }
+}
+
+function openTimePicker(currentVal, callback) {
+  State.timePickerCallback = callback;
+  pickerModal.classList.add('active');
+  const parsed = (currentVal || formatTime()).match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (parsed) {
+    setTimeout(() => {
+      scrollToVal(pickerHourCol, parseInt(parsed[1]).toString());
+      scrollToVal(pickerMinCol, parsed[2]);
+      scrollToVal(pickerAmpmCol, parsed[3].toUpperCase());
+    }, 60);
+  }
+}
+
+function saveTimePicker() {
+  const h = pickerHourCol.querySelector('.selected')?.dataset.val || '12';
+  const m = pickerMinCol.querySelector('.selected')?.dataset.val || '00';
+  const p = pickerAmpmCol.querySelector('.selected')?.dataset.val || 'AM';
+  const result = `${h.toString().padStart(2,'0')}:${m} ${p}`;
+  if (State.timePickerCallback) State.timePickerCallback(result);
+  pickerModal.classList.remove('active');
+}
+
+document.getElementById('btn-cancel-picker').addEventListener('click', () => pickerModal.classList.remove('active'));
+document.getElementById('btn-save-picker').addEventListener('click', saveTimePicker);
+
+// ===== OFFLINE STORAGE COUNT =====
+function updateStorageCount() {
+  const sw = State.sw.savedReports.length;
+  const fl = State.fl.savedReports.length;
+  const total = sw + fl;
+  const el = document.getElementById('menu-storage-count');
+  if (el) el.textContent = `${total} report${total !== 1 ? 's' : ''} saved locally`;
+}
+
+// ===== LOGIN =====
+document.getElementById('btn-login-confirm').addEventListener('click', doLogin);
+function doLogin() {
+  const input = document.getElementById('username');
+  const name = input.value.trim();
+  if (!name) { input.style.borderColor = 'red'; setTimeout(() => input.style.borderColor = '', 1000); return; }
+  State.currentUser = name;
+  localStorage.setItem(KEYS.USER, name);
+  document.getElementById('menu-welcome').textContent = `Hello, ${name}`;
+  loadAllData();
+  showView('menu');
+}
+
+// Auto-login
+(function checkAutoLogin() {
+  const saved = localStorage.getItem(KEYS.USER);
+  if (saved) {
+    State.currentUser = saved;
+    document.getElementById('menu-welcome').textContent = `Hello, ${saved}`;
+    loadAllData();
+    showView('menu');
+  }
+})();
+
+// ===== MENU =====
+document.getElementById('btn-goto-stopwatch').addEventListener('click', () => { State.activeModule = 'sw'; checkSwResume(); swRenderHistory(); showView('sw-dashboard'); });
+document.getElementById('btn-goto-fullloop').addEventListener('click', () => { State.activeModule = 'fl'; checkFlResume(); flRenderHistory(); showView('fl-dashboard'); });
+
+// ===== TRACKER MODULE =====
+const DEFAULTS = {
+  SAMSARA_API: 'samsara_api_WVlYNWsGXwAnZdlNiqWuCHrHsXA7wn'
+};
+
+let trackerMap = null;
+let trackerMarkers = [];
+
+// UI Reactive logic for Default API checkbox (Removed to match minimal UI)
+document.getElementById('btn-goto-tracker').addEventListener('click', () => { 
+  State.activeModule = 'tracker'; 
+  showView('tracker'); 
+
+  // Initialize Map if not already done
+  if (!trackerMap) {
+    trackerMap = L.map('tracker-map-display', {
+       zoomControl: false,
+       attributionControl: false
+    }).setView([40.7128, -74.0060], 12);
+    
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(trackerMap);
+    
+    // Load and Render Route Stops (Glowing Green Nodes)
+    loadRouteStops();
+  }
+  
+  // Necessary for Leaflet to recalculate its dimensions after being unhidden
+  setTimeout(() => trackerMap.invalidateSize(), 300);
+});
+
+// ============================================================
+// COUNTIF CONNECT MODULE
+// ============================================================
+
+document.getElementById('btn-experiment').addEventListener('click', () => {
+  showView('countif');
+  countifResetDashboard();
+});
+
+const COUNTIF_PROXY_URL = (() => {
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return 'http://localhost:3001';
+  }
+  // For production, proxy runs on same host or configure your deployed URL here
+  return 'http://localhost:3001';
+})();
+
+function countifResetDashboard() {
+  const steps = document.querySelectorAll('.countif-step');
+  steps.forEach(s => {
+    s.classList.remove('active', 'complete', 'error');
+  });
+  document.getElementById('countif-result').style.display = 'none';
+  const badge = document.getElementById('countif-status-badge');
+  badge.style.background = 'rgba(255,255,255,0.05)';
+  badge.style.color = 'rgba(255,255,255,0.4)';
+  badge.innerHTML = '<div class="status-dot"></div><span>Idle</span>';
+  
+  const btn = document.getElementById('btn-countif-connect');
+  btn.innerHTML = `
+    <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-navigation"/></svg>
+    <span>Connect to Dispatch</span>
+    <div class="gloss-sheen"></div>
+  `;
+  btn.disabled = false;
+
+  // Reset View State
+  document.getElementById('countif-setup').style.display = 'block';
+  document.getElementById('countif-portal').style.display = 'none';
+  
+  // Clear data
+  portalData = [];
+  portalSessionCookie = null;
+  document.getElementById('portal-results-list').innerHTML = '';
+  document.getElementById('portal-results-area').style.display = 'none';
+}
+
+document.getElementById('btn-countif-reconnect').addEventListener('click', () => {
+  countifResetDashboard();
+});
+
+function countifSetStep(stepName, state) {
+  const stepEl = document.querySelector(`.countif-step[data-step="${stepName}"]`);
+  if (!stepEl) return;
+  stepEl.classList.remove('active', 'complete', 'error');
+  stepEl.classList.add(state);
+}
+
+function countifSetBadge(text, color) {
+  const badge = document.getElementById('countif-status-badge');
+  const colorMap = {
+    yellow: { bg: 'rgba(241, 196, 15, 0.2)', fg: '#f1c40f' },
+    green: { bg: 'rgba(46, 204, 113, 0.2)', fg: '#2ecc71' },
+    red: { bg: 'rgba(231, 76, 60, 0.2)', fg: '#e74c3c' }
+  };
+  const c = colorMap[color] || colorMap.yellow;
+  badge.style.background = c.bg;
+  badge.style.color = c.fg;
+  badge.innerHTML = `<div class="status-dot" style="background:${c.fg};"></div><span>${text}</span>`;
+}
+
+let portalSessionCookie = null;
+let portalData = [];
+
+async function fetchDispatchData(contextLabel = 'Data') {
+  if (!portalSessionCookie) return;
+  
+  const refreshBtn = document.getElementById('btn-portal-refresh');
+  const syncIndicator = document.getElementById('portal-sync-indicator');
+  const syncMessage = document.getElementById('portal-sync-message');
+  const syncProgress = document.getElementById('portal-sync-progress');
+  
+  const originalText = refreshBtn.querySelector('span').textContent;
+  refreshBtn.disabled = true;
+  refreshBtn.querySelector('span').textContent = 'Syncing...';
+  refreshBtn.style.opacity = '0.7';
+
+  // Show status indicator
+  syncIndicator.style.display = 'block';
+  syncMessage.textContent = `Syncing ${contextLabel}...`;
+  syncProgress.classList.add('sync-anim');
+
+  try {
+    const response = await fetch(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}`);
+    const result = await response.json();
+
+    if (result.success) {
+      portalData = (result.data || []).reverse();
+      console.log(`[Portal] Synced ${portalData.length} records (Reversed for chronology).`);
+      
+      // Initially show first 5 most recent if we aren't in a specific filter context
+      if (contextLabel === 'Data') {
+        renderPortalResults(portalData.slice(0, 5));
+        document.getElementById('portal-results-count').textContent = `${portalData.length}`;
+        document.getElementById('portal-filter-tag').textContent = 'Live Feed';
+      }
+    } else {
+      if (result.message === 'Session expired.') {
+        alert('CountIf Session Expired. Please reconnect.');
+        countifResetDashboard();
+      }
+    }
+  } catch (err) {
+    console.error('[Portal] Sync error:', err);
+  } finally {
+    refreshBtn.disabled = false;
+    refreshBtn.querySelector('span').textContent = originalText;
+    refreshBtn.style.opacity = '1';
+    
+    // Hide indicator after a small delay for visual weight
+    setTimeout(() => {
+      syncIndicator.style.display = 'none';
+      syncProgress.classList.remove('sync-anim');
+    }, 800);
+  }
+}
+
+function renderPortalResults(records, filterLabel = '', options = {}) {
+  const list = document.getElementById('portal-results-list');
+  const area = document.getElementById('portal-results-area');
+  const tag = document.getElementById('portal-filter-tag');
+  
+  const snapshotArea = document.getElementById('portal-snapshot-area');
+  const driverRow = document.getElementById('portal-snapshot-driver');
+  const superRow = document.getElementById('portal-snapshot-supervisor');
+  const drVal = document.getElementById('snapshot-driver-val');
+  const supVal = document.getElementById('snapshot-supervisor-val');
+
+  if (filterLabel) {
+    tag.textContent = filterLabel;
+  }
+
+  // Handle Snapshot Logic
+  snapshotArea.style.display = 'none';
+  driverRow.style.display = 'none';
+  superRow.style.display = 'none';
+
+  // Blacklisted supervisors (partial match)
+  const superBlacklist = ['Stevenson', 'Michael Leshaj'];
+  // Supervisory role suffixes — only users with these in their name count as supervisors
+  const supervisorRoles = ['Supervisor', 'Coordinator', 'FieldCoordinator'];
+
+  function isBlacklisted(userName) {
+    return superBlacklist.some(bl => userName.includes(bl));
+  }
+  function isSupervisor(userName) {
+    return supervisorRoles.some(role => userName.includes(role));
+  }
+
+  if (records && records.length > 0) {
+    const isBus = filterLabel.toLowerCase().includes('bus');
+    const isStop = filterLabel.toLowerCase().includes('stop');
+
+    if (isBus || isStop) {
+      snapshotArea.style.display = 'block';
+      if (isBus) {
+        driverRow.style.display = 'block';
+        drVal.textContent = records[0].operator;
+      }
+      if (isStop) {
+        superRow.style.display = 'flex';
+        
+        // Search ALL records for this stop (not just the 5 displayed)
+        const allMatches = options.allMatches || records;
+        // Find the most recent user who HAS a supervisor/coordinator role AND is NOT blacklisted
+        const validRec = allMatches.find(r => isSupervisor(r.user) && !isBlacklisted(r.user)) || allMatches[0];
+        
+        // Extract H:MM
+        let timeStr = '---';
+        const parts = validRec.date.split(' ');
+        if (parts.length >= 2) {
+          const timeParts = parts[1].split(':'); // "8:00:43"
+          if (timeParts.length >= 2) {
+             const ampm = parts[2] || '';
+             timeStr = `${timeParts[0]}:${timeParts[1]} ${ampm}`.trim();
+          }
+        }
+        
+        supVal.textContent = `${validRec.user} | ${timeStr}`;
+        
+        // Setup copy button
+        const copyBtn = document.getElementById('btn-copy-snapshot-super');
+        copyBtn.onclick = () => {
+           navigator.clipboard.writeText(validRec.user).then(() => {
+              const originalColor = copyBtn.style.background;
+              copyBtn.style.background = 'var(--green)';
+              setTimeout(() => copyBtn.style.background = originalColor, 500);
+           });
+        };
+      }
+    }
+  }
+
+  if (!records || records.length === 0) {
+    list.innerHTML = `<div style="text-align:center; padding: 2rem; opacity:0.5; font-size:0.8rem;">No matching entries found.</div>`;
+    area.style.display = 'block';
+    return;
+  }
+
+  area.style.display = 'block';
+  list.innerHTML = records.map(record => {
+    // Auto-detect if we should hide date (if label includes "Bus" or "Stop")
+    const isFiltered = filterLabel.toLowerCase().includes('bus') || 
+                       filterLabel.toLowerCase().includes('stop') || 
+                       options.timeOnly;
+    
+    let timestamp = record.date;
+    if (isFiltered) {
+      // Extract time from: "4/20/2026 1:18:41 PM"
+      const parts = record.date.split(' ');
+      if (parts.length >= 2) {
+        timestamp = parts.slice(1).join(' '); // "1:18:41 PM"
+      }
+    }
+
+    return `
+      <div class="result-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 0.8rem; margin-bottom: 0.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.4rem;">
+          <span style="color: var(--green); font-weight: 700; font-size: 0.95rem;">Bus ${record.bus}</span>
+          <span style="font-size: 0.85rem; font-weight: 600; opacity: 0.8; color: white;">${timestamp}</span>
+        </div>
+        ${options.hideStop ? '' : `<div style="font-size: 0.8rem; color: white; margin-bottom: 0.3rem; opacity: 0.9;">${record.stop}</div>`}
+        <div style="font-size: 0.95rem; opacity: 0.8; font-weight: 500;">${record.operator} • ${record.route}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function filterPortalData(type) {
+  // Always verify we have a session
+  if (!portalSessionCookie) return;
+  
+  if (type === 'bus') {
+    const busNum = window.prompt('Enter Bus #:');
+    if (busNum === null) return;
+    if (!busNum.trim()) return alert('Please enter a Bus #');
+    
+    // Refresh data FIRST
+    await fetchDispatchData(`Bus #${busNum.trim()}`);
+    
+    const matches = portalData.filter(r => r.bus === busNum.trim());
+    renderPortalResults(matches.slice(0, 5), `Bus ${busNum}`, { timeOnly: true });
+  } else if (type === 'stop') {
+    const stopNum = window.prompt('Enter Stop #:');
+    if (stopNum === null) return;
+    if (!stopNum.trim()) return alert('Please enter a Stop #');
+    
+    // Refresh data FIRST
+    await fetchDispatchData(`Stop #${stopNum.trim()}`);
+    
+    // Use exact stop number matching: "STOP 1 " won't match "STOP 10", "STOP 13", etc.
+    const target = `STOP ${stopNum.trim()} `;
+    const matches = portalData.filter(r => r.stop && r.stop.includes(target));
+    // Pass ALL matches for supervisor lookup, but only display 5
+    renderPortalResults(matches.slice(0, 5), `Stop ${stopNum}`, { hideStop: true, allMatches: matches });
+  }
+}
+
+document.getElementById('btn-portal-bus').addEventListener('click', () => filterPortalData('bus'));
+document.getElementById('btn-portal-stop').addEventListener('click', () => filterPortalData('stop'));
+document.getElementById('btn-portal-refresh').addEventListener('click', () => fetchDispatchData());
+
+document.getElementById('btn-countif-connect').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-countif-connect');
+  btn.disabled = true;
+  btn.innerHTML = '<span>Connecting...</span>';
+  
+  // Reset all steps to fresh
+  countifResetDashboard();
+  btn.disabled = true;
+  btn.innerHTML = '<span>Connecting...</span>';
+  
+  const stageOrder = ['init', 'page_loaded', 'tokens_harvested', 'authenticated'];
+  
+  // Animate stage 1: Init
+  countifSetStep('init', 'active');
+  countifSetBadge('Connecting...', 'yellow');
+  
+  try {
+    // Simulate brief delay for visual feedback before the actual POST
+    await new Promise(r => setTimeout(r, 400));
+    
+    const response = await fetch(`${COUNTIF_PROXY_URL}/api/countif/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'fvazquez',
+        password: 'Topview12345'
+      })
+    });
+    
+    const data = await response.json();
+    
+    // Animate through the stages the server reported
+    if (data.stages && data.stages.length > 0) {
+      for (let i = 0; i < data.stages.length; i++) {
+        const stage = data.stages[i];
+        const stageIdx = stageOrder.indexOf(stage.stage);
+        
+        // Mark all previous stages as complete
+        for (let j = 0; j < stageIdx; j++) {
+          countifSetStep(stageOrder[j], 'complete');
+        }
+        
+        // Set the current stage
+        if (stage.stage === 'auth_failed' || stage.stage === 'error') {
+          // Mark current stage as error
+          const lastIdx = Math.min(stageIdx >= 0 ? stageIdx : stageOrder.length - 1, stageOrder.length - 1);
+          countifSetStep(stageOrder[lastIdx], 'error');
+        } else {
+          countifSetStep(stage.stage, i === data.stages.length - 1 ? 'complete' : 'complete');
+        }
+        
+        // Slight delay between stage animations
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+    
+    if (data.success) {
+      // All steps complete
+      stageOrder.forEach(s => countifSetStep(s, 'complete'));
+      countifSetBadge('Authenticated', 'green');
+      
+      // Store session
+      portalSessionCookie = data.result?.sessionCookie;
+
+      // WAIT for user to see the success checkmarks for a second before switching to portal
+      await new Promise(r => setTimeout(r, 800));
+
+      // TRANSITION TO PORTAL GRID
+      document.getElementById('countif-setup').style.display = 'none';
+      document.getElementById('countif-portal').style.display = 'block';
+      
+      // Auto-fetch data
+      fetchDispatchData();
+      
+    } else {
+      // Show result error card
+      const resultEl = document.getElementById('countif-result');
+      const resultIcon = document.getElementById('countif-result-icon');
+      const resultTitle = document.getElementById('countif-result-title');
+      const resultMsg = document.getElementById('countif-result-msg');
+      
+      resultEl.style.display = 'block';
+      countifSetBadge('Failed', 'red');
+      
+      resultEl.style.background = 'rgba(231, 76, 60, 0.1)';
+      resultEl.style.border = '1px solid rgba(231, 76, 60, 0.3)';
+      resultIcon.textContent = '✗';
+      resultIcon.style.color = '#e74c3c';
+      resultTitle.textContent = 'Authentication Failed';
+      resultTitle.style.color = '#e74c3c';
+      resultMsg.textContent = data.result?.message || 'Could not authenticate.';
+      
+      btn.innerHTML = `
+        <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-navigation"/></svg>
+        <span>Retry Connection</span>
+        <div class="gloss-sheen"></div>
+      `;
+      btn.disabled = false;
+    }
+    
+  } catch (err) {
+    // Network error — proxy is down or unreachable
+    countifSetStep('init', 'error');
+    countifSetBadge('Offline', 'red');
+    
+    const resultEl = document.getElementById('countif-result');
+    resultEl.style.display = 'block';
+    resultEl.style.background = 'rgba(231, 76, 60, 0.1)';
+    resultEl.style.border = '1px solid rgba(231, 76, 60, 0.3)';
+    document.getElementById('countif-result-icon').textContent = '⚠';
+    document.getElementById('countif-result-icon').style.color = '#e74c3c';
+    document.getElementById('countif-result-title').textContent = 'Connection Error';
+    document.getElementById('countif-result-title').style.color = '#e74c3c';
+    document.getElementById('countif-result-msg').textContent = `Backend proxy unreachable: ${err.message}`;
+    
+    btn.innerHTML = `
+      <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-navigation"/></svg>
+      <span>Retry Connection</span>
+      <div class="gloss-sheen"></div>
+    `;
+    btn.disabled = false;
+  }
+});
+
+
+async function loadRouteStops() {
+  if (!trackerMap) return;
+  try {
+    const response = await fetch('stops_data.json');
+    const stops = await response.json();
+    
+    stops.forEach(stop => {
+      const stopNum = stop.name.replace('Stop ', '');
+      const stopIcon = L.divIcon({
+        html: `
+          <div class="stop-marker-wrapper">
+            <div class="stop-tip">${stop.name}</div>
+            <div class="stop-dot">${stopNum}</div>
+          </div>
+        `,
+        className: 'stop-custom-marker',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+      
+      L.marker([stop.lat, stop.lng], { icon: stopIcon, zIndexOffset: -100 }).addTo(trackerMap);
+    });
+    console.log(`[Stops] ${stops.length} nodes rendered on Noir map.`);
+  } catch (err) {
+    console.error("Error loading route stops:", err);
+  }
+}
+
+document.getElementById('btn-run-tracker').addEventListener('click', async () => {
+  const apiKey = DEFAULTS.SAMSARA_API;
+  const busId = document.getElementById('tracker-bus-number').value.trim();
+  const stopIdString = document.getElementById('tracker-route-input').value.trim();
+  const stopId = parseInt(stopIdString, 10);
+  
+  if (!apiKey) { alert('Samsara API configuration missing.'); return; }
+  if (!busId && !stopIdString) { alert('Please enter a Bus Number or Stop Number'); return; }
+  
+  const btn = document.getElementById('btn-run-tracker');
+  const orgText = btn.innerHTML;
+  const statusBadge = document.getElementById('tracker-api-status');
+  
+  // UI Reset: Prevent dragging old data while the fresh signal is being resolved
+  document.getElementById('tracker-last-stop').textContent = '...';
+  document.getElementById('tracker-next-stop').textContent = '...';
+  document.getElementById('tracker-street-addr').textContent = 'Syncing Fresh Satellite Position...';
+  document.getElementById('tracker-active-time').textContent = '--';
+  
+  btn.innerHTML = '<span>Pinging Satellite...</span>';
+  statusBadge.style.background = 'rgba(241, 196, 15, 0.2)';
+  statusBadge.style.color = '#f1c40f';
+  statusBadge.innerHTML = '<div class="status-dot" style="background:#f1c40f;"></div><span>Connecting...</span>';
+  
+  // Clear existing tracking markers
+  trackerMarkers.forEach(m => trackerMap.removeLayer(m));
+  trackerMarkers = [];
+
+  try {
+     document.getElementById('tracker-results-container').style.display = 'block';
+
+     if (busId) {
+       // --- BUS TRACKING BRANCH ---
+       const busGps = await window.SamsaraEngine.fetchBusLocation(busId, apiKey);
+       
+       statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+       statusBadge.style.color = '#2ecc71';
+       statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Connected</span>';
+       
+       const context = window.SamsaraEngine.resolveRouteContext(busGps, window.SamsaraEngine.CONFIG.STOPS);
+       document.getElementById('tracker-last-stop').parentElement.querySelector('.stat-label').textContent = 'LAST STOP';
+       document.getElementById('tracker-next-stop').parentElement.querySelector('.stat-label').textContent = 'UPCOMING';
+       document.getElementById('tracker-last-stop').textContent = context.lastVisited ? context.lastVisited.name : 'Unknown';
+       document.getElementById('tracker-next-stop').textContent = context.upcoming ? context.upcoming.name : 'Unknown';
+
+       // Update Freshness & Address
+       const gpsTimeStr = busGps.time || new Date().toISOString();
+       const gpsTime = new Date(gpsTimeStr);
+       const now = Date.now();
+       
+       // Handle potential clock drift (if satellite is slightly ahead or behind)
+       const diffMs = Math.abs(now - gpsTime.getTime());
+       const diffMins = Math.floor(diffMs / 60000);
+       
+       // User requirement: Sync from 1 minute ago at most
+       const timeStr = diffMins <= 1 ? "Live" : `${diffMins}m ago`;
+       
+       const timeEl = document.getElementById('tracker-active-time');
+       timeEl.textContent = `Active: ${timeStr}`;
+       
+       // Red alert if data is older than 5 minutes
+       timeEl.style.color = (diffMins > 5 && timeStr !== "Live") ? '#e74c3c' : '#2ecc71'; 
+       
+       document.getElementById('tracker-street-addr').textContent = busGps.address;
+
+       // Interactive Map Update: Custom Bus Marker (Samsara-Style Green Dot + Label)
+       const pos = [busGps.latitude, busGps.longitude];
+       const busIdDisplay = busId || "Bus";
+       
+       const customIcon = L.divIcon({
+         html: `
+           <div class="bus-marker-wrapper">
+             <div class="bus-number-label">${busIdDisplay}</div>
+             <div class="bus-beacon">
+               <div class="bus-dot-core"></div>
+               <div class="bus-pulse-ring"></div>
+             </div>
+           </div>
+         `,
+         className: 'bus-custom-marker',
+         iconSize: [40, 40],
+         iconAnchor: [20, 36] 
+       });
+
+       const marker = L.marker(pos, { icon: customIcon }).addTo(trackerMap);
+       trackerMarkers.push(marker);
+
+       trackerMap.setView(pos, 16, { animate: true });
+       
+     } else {
+       // --- STOP RADIUS BRANCH ---
+       const stopObj = window.SamsaraEngine.CONFIG.STOPS.find(s => s.id === stopId);
+       if (!stopObj) throw new Error("Invalid Stop #");
+
+       const closestBuses = await window.SamsaraEngine.findBusesNearStop(stopObj.lat, stopObj.lng, apiKey, 5);
+       
+       statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+       statusBadge.style.color = '#2ecc71';
+       statusBadge.innerHTML = `<div class="status-dot" style="background:#2ecc71;"></div><span>Radius Scan Active</span>`;
+       
+       document.getElementById('tracker-last-stop').parentElement.querySelector('.stat-label').textContent = 'SCANNED STOP';
+       document.getElementById('tracker-next-stop').parentElement.querySelector('.stat-label').textContent = 'CLOSEST BUSES';
+       document.getElementById('tracker-last-stop').textContent = stopObj.name;
+       
+       const busNames = closestBuses.map(b => b.name).join(' & ');
+       document.getElementById('tracker-next-stop').textContent = closestBuses.length > 0 ? busNames : "None nearby";
+
+       const timeEl = document.getElementById('tracker-active-time');
+       timeEl.textContent = `Radius Scan`;
+       timeEl.style.color = '#2ecc71';
+       document.getElementById('tracker-street-addr').textContent = `Showing closest buses to ${stopObj.name}`;
+
+       let bounds = [];
+       bounds.push([stopObj.lat, stopObj.lng]); // Include the stop itself in the bounds
+
+       closestBuses.forEach(bus => {
+         const pos = [bus.latitude, bus.longitude];
+         bounds.push(pos);
+         
+         const customIcon = L.divIcon({
+           html: `
+             <div class="bus-marker-wrapper">
+               <div class="bus-number-label">${bus.name}</div>
+               <div class="bus-beacon">
+                 <div class="bus-dot-core"></div>
+                 <div class="bus-pulse-ring"></div>
+               </div>
+             </div>
+           `,
+           className: 'bus-custom-marker',
+           iconSize: [40, 40],
+           iconAnchor: [20, 36] 
+         });
+    
+         const marker = L.marker(pos, { icon: customIcon }).addTo(trackerMap);
+         trackerMarkers.push(marker);
+       });
+
+       // Always focus directly on the queried Stop location instead of zooming out to fit buses
+       trackerMap.setView([stopObj.lat, stopObj.lng], 16, { animate: true });
+     }
+     
+     // Ensure map is correctly rendered
+     setTimeout(() => trackerMap.invalidateSize(), 100);
+     
+     btn.innerHTML = `
+       <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-navigation"/></svg>
+       <span>Pinged</span>
+     `;
+     setTimeout(() => btn.innerHTML = orgText, 2500);
+     
+  } catch(e) {
+     statusBadge.style.background = 'rgba(231, 76, 60, 0.2)';
+     statusBadge.style.color = '#e74c3c';
+     statusBadge.innerHTML = `<div class="status-dot" style="background:#e74c3c;"></div><span>${e.message}</span>`;
+     btn.innerHTML = orgText;
+  }
+});
+
+document.getElementById('btn-show-all-buses').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-show-all-buses');
+  const orgText = btn.innerHTML;
+  const apiKey = DEFAULTS.SAMSARA_API;
+  
+  if (!apiKey) { alert('Samsara API configuration missing.'); return; }
+  const statusBadge = document.getElementById('tracker-api-status');
+  
+  btn.innerHTML = '<span>Scanning Fleet...</span>';
+  statusBadge.style.background = 'rgba(241, 196, 15, 0.2)';
+  statusBadge.style.color = '#f1c40f';
+  statusBadge.innerHTML = '<div class="status-dot" style="background:#f1c40f;"></div><span>Connecting...</span>';
+  
+  trackerMarkers.forEach(m => trackerMap.removeLayer(m));
+  trackerMarkers = [];
+  
+  try {
+     document.getElementById('tracker-results-container').style.display = 'block';
+     
+     // Pull all buses globally using large limit fallback
+     const closestBuses = await window.SamsaraEngine.findBusesNearStop(0, 0, apiKey, 500);
+     
+     statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+     statusBadge.style.color = '#2ecc71';
+     statusBadge.innerHTML = `<div class="status-dot" style="background:#2ecc71;"></div><span>Fleet Scan Active</span>`;
+     
+     document.getElementById('tracker-last-stop').parentElement.querySelector('.stat-label').textContent = 'TOTAL SCANNED';
+     document.getElementById('tracker-next-stop').parentElement.querySelector('.stat-label').textContent = 'ACTIVE BUSES';
+     document.getElementById('tracker-last-stop').textContent = closestBuses.length;
+     document.getElementById('tracker-next-stop').textContent = "Map Updated";
+     
+     const timeEl = document.getElementById('tracker-active-time');
+     timeEl.textContent = `Live`;
+     timeEl.style.color = '#2ecc71';
+     document.getElementById('tracker-street-addr').textContent = `Showing all ${closestBuses.length} active buses`;
+     
+     let bounds = [];
+     closestBuses.forEach(bus => {
+       const pos = [bus.latitude, bus.longitude];
+       bounds.push(pos);
+       const customIcon = L.divIcon({
+          html: `
+            <div class="bus-marker-wrapper">
+              <div class="bus-number-label">${bus.name}</div>
+              <div class="bus-beacon">
+                <div class="bus-dot-core"></div>
+                <div class="bus-pulse-ring"></div>
+              </div>
+            </div>
+          `,
+          className: 'bus-custom-marker',
+          iconSize: [40, 40],
+          iconAnchor: [20, 36] 
+       });
+       const marker = L.marker(pos, { icon: customIcon }).addTo(trackerMap);
+       trackerMarkers.push(marker);
+     });
+     
+     // Set viewport to center rigidly on Stop 1 at 14 zoom level
+     trackerMap.setView([40.759433036950966, -73.98454271585518], 14, { animate: true });
+     
+     setTimeout(() => trackerMap.invalidateSize(), 100);
+     
+     btn.innerHTML = `
+       <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-bus"/></svg>
+       <span>All Buses Displayed</span>
+     `;
+     setTimeout(() => btn.innerHTML = orgText, 2500);
+     
+  } catch(e) {
+     statusBadge.style.background = 'rgba(231, 76, 60, 0.2)';
+     statusBadge.style.color = '#e74c3c';
+     statusBadge.innerHTML = `<div class="status-dot" style="background:#e74c3c;"></div><span>${e.message}</span>`;
+     btn.innerHTML = orgText;
+  }
+});
+
+document.getElementById('btn-menu-logout').addEventListener('click', () => {
+  State.currentUser = null;
+  localStorage.removeItem(KEYS.USER);
+  document.getElementById('username').value = '';
+  showView('login');
+});
+
+// ===== LOAD ALL DATA =====
+function loadAllData() {
+  // SW
+  const swReports = localStorage.getItem(KEYS.SW_REPORTS);
+  if (swReports) State.sw.savedReports = JSON.parse(swReports);
+  // FL
+  const flReports = localStorage.getItem(KEYS.FL_REPORTS);
+  if (flReports) State.fl.savedReports = JSON.parse(flReports);
+  const flDrivers = localStorage.getItem(KEYS.FL_DRIVERS);
+  if (flDrivers) State.fl.drivers = JSON.parse(flDrivers);
+  updateStorageCount();
+}
+
+// ===== REPORT VIEWER =====
+let currentReportText = '';
+
+function openReportViewer(content, title) {
+  currentReportText = content;
+  document.getElementById('report-viewer-title').textContent = title || 'Report';
+  const body = document.getElementById('report-viewer-body');
+  body.innerHTML = '';
+  const lines = content.split('\n');
+  lines.forEach(line => {
+    if (!line && lines.indexOf(line) === lines.length - 1) return; // skip trailing empty
+    const row = document.createElement('div');
+    row.className = 'report-line';
+    const text = document.createElement('span');
+    text.className = 'report-line-text';
+    if (line.match(/^[A-Z ]+:$/)) text.classList.add('header-line');
+    if (line.match(/^[-=]+$/)) text.classList.add('separator-line');
+    text.textContent = line || ' ';
+    const btn = document.createElement('button');
+    btn.className = 'btn-copy-line';
+    btn.innerHTML = '<svg class="icon-xs"><use href="#icon-clipboard"/></svg>';
+    btn.addEventListener('click', () => {
+      // FORCE textarea fallback exclusively to bypass iOS URL encoding bugs on line copy
+      const ta = document.createElement('textarea');
+      ta.value = line; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+      document.body.removeChild(ta);
+      btn.classList.add('copied');
+      setTimeout(() => btn.classList.remove('copied'), 1200);
+    });
+    row.appendChild(text);
+    if (line.trim()) row.appendChild(btn);
+    body.appendChild(row);
+  });
+  document.getElementById('report-viewer-modal').classList.add('active');
+}
+
+document.getElementById('btn-close-report-viewer').addEventListener('click', () => {
+  document.getElementById('report-viewer-modal').classList.remove('active');
+});
+
+document.getElementById('btn-close-report-viewer-top').addEventListener('click', () => {
+  document.getElementById('report-viewer-modal').classList.remove('active');
+});
+document.getElementById('btn-share-report').addEventListener('click', () => {
+  if (navigator.share) {
+    navigator.share({
+      title: document.getElementById('report-viewer-title').textContent,
+      text: currentReportText
+    }).catch(() => {});
+  } else {
+    alert("Export not supported on this device/browser.");
+  }
+});
+
+document.getElementById('btn-download-txt-report').addEventListener('click', () => {
+  const title = document.getElementById('report-viewer-title').textContent.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  const file = new File([currentReportText], `${title}_report.txt`, { type: 'text/plain' });
+  
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({
+      files: [file],
+      title: `${title} Report`,
+    }).catch(err => console.log('Share canceled', err));
+  } else {
+    // Fallback if File sharing is disabled
+    const blob = new Blob([currentReportText], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${title}_report.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }
+});
+
+// Quick Form Links in Report Viewer
+document.querySelectorAll('.hud-shortcut').forEach(btn => {
+  btn.addEventListener('click', () => {
+    window.open(btn.dataset.url, '_blank');
+  });
+});
+
+document.getElementById('btn-copy-all-report').addEventListener('click', () => {
+  const btn = document.getElementById('btn-copy-all-report');
+  // FORCE textarea fallback exclusively to bypass iOS URL encoding bugs on block copy
+  const ta = document.createElement('textarea');
+  ta.value = currentReportText; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+  document.body.removeChild(ta);
+  btn.querySelector('span').textContent = 'Copied!';
+  setTimeout(() => btn.querySelector('span').textContent = 'Copy All', 1500);
+});
+
+// ============================================================
+// STOPWATCH MODULE
+// ============================================================
+
+function swSaveSession() { localStorage.setItem(KEYS.SW_SESSION, JSON.stringify(State.sw.session)); }
+function swClearSession() { localStorage.removeItem(KEYS.SW_SESSION); }
+
+function checkSwResume() {
+  const saved = localStorage.getItem(KEYS.SW_SESSION);
+  const btn = document.getElementById('sw-btn-resume');
+  if (saved) {
+    const s = JSON.parse(saved);
+    if (s.inspector === State.currentUser && (s.supervisor || s.violations.length > 0)) {
+      State.sw.session = s;
+      btn.classList.remove('hidden');
+      return;
+    }
+  }
+  btn.classList.add('hidden');
+}
+
+document.getElementById('sw-btn-start-new').addEventListener('click', () => {
+  swClearSession();
+  document.getElementById('sw-btn-resume').classList.add('hidden');
+  document.getElementById('sw-supervisor-name').value = '';
+  document.getElementById('sw-stop-num').value = '';
+  document.getElementById('sw-time-started').value = formatTime();
+  showView('sw-new');
+});
+
+document.getElementById('sw-btn-resume').addEventListener('click', () => { swUpdateDisplay(); swRenderLog(); showView('sw-session'); });
+document.getElementById('sw-btn-view-all').addEventListener('click', () => { swRenderHistory(); showView('sw-history'); });
+
+// Time input click
+document.getElementById('sw-time-started').addEventListener('click', () => {
+  openTimePicker(document.getElementById('sw-time-started').value, v => document.getElementById('sw-time-started').value = v);
+});
+
+// Start session
+document.getElementById('sw-btn-confirm-start').addEventListener('click', () => {
+  const sup = document.getElementById('sw-supervisor-name').value.trim();
+  const stop = document.getElementById('sw-stop-num').value.trim();
+  const time = document.getElementById('sw-time-started').value.trim();
+  if (!sup || !stop) { alert('Please fill in all fields'); return; }
+  State.sw.editingSavedReportIndex = null;
+  State.sw.session = { inspector: State.currentUser, supervisor: sup, stopNum: stop, startTime: time, endTime: null, violations: [] };
+  swUpdateDisplay(); swRenderLog(); swSaveSession();
+  showView('sw-session');
+});
+
+function swUpdateDisplay() {
+  document.getElementById('sw-session-sup').textContent = State.sw.session.supervisor;
+  document.getElementById('sw-session-stop').textContent = State.sw.session.stopNum;
+  document.getElementById('sw-session-start').textContent = State.sw.session.startTime;
+}
+
+// Violation buttons
+document.querySelectorAll('#sw-violation-grid .violation-btn-sm:not(.custom-btn)').forEach(btn => {
+  btn.addEventListener('click', () => openViolationDetail('sw', btn.dataset.type));
+});
+document.getElementById('sw-btn-custom-violation').addEventListener('click', () => openCustomModal('sw'));
+
+// Edit session
+document.getElementById('sw-btn-edit-session').addEventListener('click', () => {
+  openEditSessionModal('sw');
+});
+
+// End session
+document.getElementById('sw-btn-finish').addEventListener('click', () => {
+  openTimePicker(formatTime(), endTime => {
+    State.sw.session.endTime = endTime;
+    const report = swGenerateReport(State.sw.session);
+    swSaveReport(State.sw.session);
+    swClearSession();
+    checkSwResume();
+    showView('sw-dashboard');
+    setTimeout(() => openReportViewer(report, `${State.sw.session.supervisor} — Stop #${State.sw.session.stopNum}`), 400);
+  });
+});
+
+function swRenderLog() {
+  const list = document.getElementById('sw-violation-list');
+  const badge = document.getElementById('sw-violation-count');
+  const violations = State.sw.session.violations;
+  badge.textContent = `${violations.length} logged`;
+  list.innerHTML = '';
+  if (violations.length === 0) {
+    list.innerHTML = `<div style="text-align:center;padding:3rem 1rem;opacity:.3;"><svg class="icon" style="width:32px;height:32px;margin-bottom:.5rem;"><use href="#icon-folder"/></svg><p style="font-size:.75rem;">No violations logged yet</p></div>`;
+    return;
+  }
+  [...violations].sort((a,b) => b.sortMinutes - a.sortMinutes).forEach(v => {
+    const idx = violations.indexOf(v);
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    let label = v.type;
+    if (v.type === 'Bus Dispatch') { label += v.isLate ? ' (Late)' : v.noInput ? ' (No Input)' : ' (On Time)'; }
+    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${v.notes ? `<span class="log-notes">${v.type==='Bus Dispatch'?'Bus #':''}${v.notes}</span>` : ''}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm sw-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button></div>`;
+    li.querySelector('.sw-edit-log').onclick = () => openViolationDetail('sw', v.type, idx);
+    list.appendChild(li);
+  });
+}
+
+function swGenerateReport(s) {
+  let r = `SESSION DETAILS:\n`;
+  r += `----------------\n`;
+  r += `Date: ${s.date || new Date().toLocaleDateString()}\n`;
+  r += `Supervisor: ${s.supervisor}\n`;
+  r += `Stop #: ${s.stopNum}\n`;
+  r += `Time Started: ${stripAmPm(s.startTime)}\n`;
+  r += `Time Ended: ${stripAmPm(s.endTime)}\n\n\n`;
+  r += `VIOLATIONS LOG:\n`;
+  r += `---------------\n`;
+  if (s.violations.length === 0) { r += 'No violations recorded.\n'; return r; }
+  const sorted = [...s.violations].sort((a,b) => a.sortMinutes - b.sortMinutes);
+  const groups = {};
+  sorted.forEach(v => { if (!groups[v.type]) groups[v.type] = []; groups[v.type].push(v); });
+  Object.keys(groups).forEach(type => {
+    if (type === 'Bus Dispatch') {
+      const accurate = groups[type].filter(v => !v.isLate && !v.noInput);
+      const inaccurate = groups[type].filter(v => v.isLate || v.noInput);
+      if (accurate.length > 0) r += `Accurate updates to dispatch: ${accurate.map(v => `${v.notes}(${stripAmPm(v.timestamp)})`).join(', ')}\n`;
+      if (inaccurate.length > 0) {
+        r += `Inaccurate updates to dispatch: ${inaccurate.map(v => {
+          const tags = []; if (v.isLate) tags.push('Late'); if (v.noInput) tags.push("Didnt Input");
+          return `${v.notes}(${stripAmPm(v.timestamp)},${tags.join('/')})`;
+        }).join(', ')}\n`;
+      }
+    } else if (type === 'Uniform') {
+      const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
+      if (notes) r += `${notes}\n`;
+    } else {
+      const times = groups[type].map(v => { const n = v.notes ? ` (${v.notes})` : ''; return `${stripAmPm(v.timestamp)}${n}`; });
+      r += `[${times.join(', ')}] || ${type}\n`;
+    }
+  });
+  return r;
+}
+
+function swSaveReport(session) {
+  const report = { ...session, inspector: State.currentUser, id: session.id || Date.now(), date: session.date || new Date().toLocaleDateString() };
+  if (State.sw.editingSavedReportIndex === null) {
+    State.sw.savedReports.unshift(report);
+  } else {
+    State.sw.savedReports[State.sw.editingSavedReportIndex] = report;
+    State.sw.editingSavedReportIndex = null;
+  }
+  localStorage.setItem(KEYS.SW_REPORTS, JSON.stringify(State.sw.savedReports));
+  updateStorageCount();
+}
+
+function swRenderHistory() {
+  const list = document.getElementById('sw-saved-list');
+  list.innerHTML = '';
+  const mine = State.sw.savedReports.filter(r => r.inspector === State.currentUser);
+  if (mine.length === 0) { list.innerHTML = `<li class="subtitle" style="text-align:center;padding:2rem;">No reports found.</li>`; return; }
+  mine.forEach(r => {
+    const globalIdx = State.sw.savedReports.indexOf(r);
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    li.style.cursor = 'pointer';
+    li.innerHTML = `<div class="log-content"><span class="type">${r.supervisor}</span><span class="log-notes">Stop #${r.stopNum} • ${r.date}</span></div><div class="log-meta"><button class="icon-btn-sm sw-view-btn" title="View Report"><svg class="icon-sm"><use href="#icon-clipboard"/></svg></button><button class="icon-btn-sm sw-edit-btn" title="Edit"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm sw-del-report-btn" title="Delete"><svg class="icon-sm"><use href="#icon-trash"/></svg></button></div>`;
+    const openViewer = () => openReportViewer(swGenerateReport(r), `${r.supervisor} — Stop #${r.stopNum}`);
+    li.querySelector('.sw-view-btn').onclick = (e) => { e.stopPropagation(); openViewer(); };
+    li.querySelector('.log-content').onclick = openViewer;
+    li.querySelector('.sw-edit-btn').onclick = (e) => {
+      e.stopPropagation();
+      State.sw.session = JSON.parse(JSON.stringify(r));
+      State.sw.editingSavedReportIndex = globalIdx;
+      swUpdateDisplay(); swRenderLog(); showView('sw-session');
+    };
+    li.querySelector('.sw-del-report-btn').onclick = (e) => {
+      e.stopPropagation();
+      if (confirm('Delete this report?')) {
+        State.sw.savedReports.splice(globalIdx, 1);
+        localStorage.setItem(KEYS.SW_REPORTS, JSON.stringify(State.sw.savedReports));
+        updateStorageCount();
+        swRenderHistory();
+      }
+    };
+    list.appendChild(li);
+  });
+}
+
+// ============================================================
+// FULL LOOP MODULE
+// ============================================================
+
+function flSaveSession() { localStorage.setItem(KEYS.FL_SESSION, JSON.stringify(State.fl.session)); }
+function flClearSession() { localStorage.removeItem(KEYS.FL_SESSION); }
+
+function checkFlResume() {
+  const saved = localStorage.getItem(KEYS.FL_SESSION);
+  const btn = document.getElementById('fl-btn-resume');
+  if (saved) {
+    const s = JSON.parse(saved);
+    if (s.inspector === State.currentUser && (s.busNumber || s.violations.length > 0)) {
+      State.fl.session = s;
+      btn.classList.remove('hidden');
+      return;
+    }
+  }
+  btn.classList.add('hidden');
+}
+
+document.getElementById('fl-btn-start-new').addEventListener('click', () => {
+  flClearSession();
+  document.getElementById('fl-btn-resume').classList.add('hidden');
+  document.getElementById('fl-bus-number').value = '';
+  document.getElementById('fl-driver-name').value = '';
+  document.getElementById('fl-route').value = '';
+  document.getElementById('fl-stop-boarded').value = '';
+  document.getElementById('fl-time-started').value = formatTime();
+  showView('fl-new');
+});
+document.getElementById('fl-btn-resume').addEventListener('click', () => { flUpdateDisplay(); flRenderLog(); showView('fl-session'); });
+document.getElementById('fl-btn-view-all').addEventListener('click', () => { flRenderHistory(); showView('fl-history'); });
+
+document.getElementById('fl-time-started').addEventListener('click', () => {
+  openTimePicker(document.getElementById('fl-time-started').value, v => document.getElementById('fl-time-started').value = v);
+});
+
+document.getElementById('fl-btn-confirm-start').addEventListener('click', () => {
+  const bus = document.getElementById('fl-bus-number').value.trim();
+  const driver = document.getElementById('fl-driver-name').value.trim();
+  const route = document.getElementById('fl-route').value.trim();
+  const stop = document.getElementById('fl-stop-boarded').value.trim();
+  const time = document.getElementById('fl-time-started').value.trim();
+  if (!bus || !driver) { alert('Please fill in Bus Number and Driver Name'); return; }
+  State.fl.editingSavedReportIndex = null;
+  State.fl.session = { inspector: State.currentUser, busNumber: bus, driverName: driver, route: route || '', stopBoarded: stop || '', startTime: time, endTime: null, violations: [] };
+  flUpsertDriver(driver);
+  flUpdateDisplay(); flRenderLog(); flSaveSession();
+  showView('fl-session');
+});
+
+function flUpdateDisplay() {
+  document.getElementById('fl-session-bus').textContent = State.fl.session.busNumber;
+  document.getElementById('fl-session-driver').textContent = State.fl.session.driverName;
+  document.getElementById('fl-session-route').textContent = State.fl.session.route || '-';
+  document.getElementById('fl-session-start').textContent = State.fl.session.startTime;
+}
+
+// Violation buttons
+document.querySelectorAll('#fl-violation-grid .violation-btn-sm:not(.custom-btn)').forEach(btn => {
+  btn.addEventListener('click', () => openViolationDetail('fl', btn.dataset.type));
+});
+document.getElementById('fl-btn-custom-violation').addEventListener('click', () => openCustomModal('fl'));
+
+// Edit session
+document.getElementById('fl-btn-edit-session').addEventListener('click', () => openEditSessionModal('fl'));
+
+// Driver change
+document.getElementById('fl-btn-driver-change').addEventListener('click', () => {
+  document.getElementById('new-driver-input').value = State.fl.session.driverName;
+  document.getElementById('driver-change-modal').classList.add('active');
+});
+document.getElementById('btn-cancel-driver-change').addEventListener('click', () => document.getElementById('driver-change-modal').classList.remove('active'));
+document.getElementById('btn-save-driver-change').addEventListener('click', () => {
+  const name = document.getElementById('new-driver-input').value.trim();
+  if (!name) return;
+  State.fl.session.driverName = name;
+  flUpsertDriver(name);
+  flUpdateDisplay(); flSaveSession();
+  document.getElementById('driver-change-modal').classList.remove('active');
+});
+
+// End session
+document.getElementById('fl-btn-finish').addEventListener('click', () => {
+  openTimePicker(formatTime(), endTime => {
+    State.fl.session.endTime = endTime;
+    const report = flGenerateReport(State.fl.session);
+    flSaveReport(State.fl.session);
+    flClearSession();
+    checkFlResume();
+    showView('fl-dashboard');
+    setTimeout(() => openReportViewer(report, `Bus ${State.fl.session.busNumber} — ${State.fl.session.driverName}`), 400);
+  });
+});
+
+function flRenderLog() {
+  const list = document.getElementById('fl-violation-list');
+  const badge = document.getElementById('fl-violation-count');
+  const violations = State.fl.session.violations;
+  badge.textContent = `${violations.length} logged`;
+  list.innerHTML = '';
+  if (violations.length === 0) {
+    list.innerHTML = `<div style="text-align:center;padding:3rem 1rem;opacity:.3;"><svg class="icon" style="width:32px;height:32px;margin-bottom:.5rem;"><use href="#icon-folder"/></svg><p style="font-size:.75rem;">No violations logged yet</p></div>`;
+    return;
+  }
+  [...violations].sort((a,b) => b.sortMinutes - a.sortMinutes).forEach(v => {
+    const idx = violations.indexOf(v);
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    li.innerHTML = `<div class="log-content"><span class="type">${v.type}</span>${v.notes ? `<span class="log-notes">${v.notes}</span>` : ''}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm fl-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.querySelector('.fl-edit-log').onclick = () => openViolationDetail('fl', v.type, idx);
+    li.querySelector('.fl-del-log').onclick = () => {
+      State.fl.session.violations.splice(idx, 1);
+      flRenderLog(); flSaveSession();
+    };
+    list.appendChild(li);
+  });
+}
+
+function flGenerateReport(s) {
+  let r = `SESSION REPORT\n`;
+  r += `================================\n`;
+  r += `Bus Number: ${s.busNumber}\n`;
+  r += `Bus Driver: ${s.driverName}\n`;
+  r += `Route: ${s.route}\n`;
+  r += `Stop Boarded: ${s.stopBoarded}\n`;
+  r += `Time Boarded: ${stripAmPm(s.startTime)}\n`;
+  r += `Time Off: ${s.endTime ? stripAmPm(s.endTime) : 'N/A'}\n\n`;
+  r += `VIOLATIONS LOG (${s.violations.length})\n`;
+  r += `--------------------------------\n`;
+  if (s.violations.length === 0) { r += 'No violations recorded.\n'; return r; }
+  const sorted = [...s.violations].sort((a,b) => a.sortMinutes - b.sortMinutes);
+  const groups = {};
+  sorted.forEach(v => { if (!groups[v.type]) groups[v.type] = []; groups[v.type].push(v); });
+  // Sort groups by earliest violation
+  const sortedKeys = Object.keys(groups).sort((a,b) => groups[a][0].sortMinutes - groups[b][0].sortMinutes);
+  sortedKeys.forEach(type => {
+    if (type.toLowerCase() === 'uniform') {
+      const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
+      if (notes) r += `${notes}\n`; else r += `Uniform violation (${groups[type].length})\n`;
+    } else {
+      const times = groups[type].map(v => { const n = v.notes ? ` (${v.notes})` : ''; return `${stripAmPm(v.timestamp)}${n}`; });
+      r += `[${times.join(', ')}] || ${type}\n`;
+    }
+  });
+  return r;
+}
+
+function flSaveReport(session) {
+  const report = { ...session, inspector: State.currentUser, id: session.id || Date.now(), date: session.date || new Date().toLocaleDateString() };
+  if (State.fl.editingSavedReportIndex === null) {
+    State.fl.savedReports.unshift(report);
+  } else {
+    State.fl.savedReports[State.fl.editingSavedReportIndex] = report;
+    State.fl.editingSavedReportIndex = null;
+  }
+  localStorage.setItem(KEYS.FL_REPORTS, JSON.stringify(State.fl.savedReports));
+  updateStorageCount();
+}
+
+function flRenderHistory() {
+  const list = document.getElementById('fl-saved-list');
+  list.innerHTML = '';
+  const mine = State.fl.savedReports.filter(r => r.inspector === State.currentUser);
+  if (mine.length === 0) { list.innerHTML = `<li class="subtitle" style="text-align:center;padding:2rem;">No reports found.</li>`; return; }
+  mine.forEach(r => {
+    const globalIdx = State.fl.savedReports.indexOf(r);
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    li.style.cursor = 'pointer';
+    li.innerHTML = `<div class="log-content"><span class="type">Bus ${r.busNumber} - ${r.route || 'No route'}</span><span class="log-notes">${r.driverName} • ${r.date}</span></div><div class="log-meta"><button class="icon-btn-sm fl-view-btn" title="View Report"><svg class="icon-sm"><use href="#icon-clipboard"/></svg></button><button class="icon-btn-sm fl-edit-btn" title="Edit"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-report-btn" title="Delete"><svg class="icon-sm"><use href="#icon-trash"/></svg></button></div>`;
+    const openViewer = () => openReportViewer(flGenerateReport(r), `Bus ${r.busNumber} — ${r.driverName}`);
+    li.querySelector('.fl-view-btn').onclick = (e) => { e.stopPropagation(); openViewer(); };
+    li.querySelector('.log-content').onclick = openViewer;
+    li.querySelector('.fl-edit-btn').onclick = (e) => {
+      e.stopPropagation();
+      State.fl.session = JSON.parse(JSON.stringify(r));
+      State.fl.editingSavedReportIndex = globalIdx;
+      flUpdateDisplay(); flRenderLog(); showView('fl-session');
+    };
+    li.querySelector('.fl-del-report-btn').onclick = (e) => {
+      e.stopPropagation();
+      if (confirm('Delete this report?')) {
+        State.fl.savedReports.splice(globalIdx, 1);
+        localStorage.setItem(KEYS.FL_REPORTS, JSON.stringify(State.fl.savedReports));
+        updateStorageCount();
+        flRenderHistory();
+      }
+    };
+    list.appendChild(li);
+  });
+}
+
+// ===== DRIVERS =====
+function flUpsertDriver(name) {
+  if (!name || !name.trim()) return;
+  const now = new Date().toISOString();
+  const idx = State.fl.drivers.findIndex(d => d.driverName === name);
+  if (idx === -1) State.fl.drivers.push({ driverName: name, lastReportDate: now });
+  else State.fl.drivers[idx].lastReportDate = now;
+  localStorage.setItem(KEYS.FL_DRIVERS, JSON.stringify(State.fl.drivers));
+}
+
+
+
+// ============================================================
+// SHARED MODALS
+// ============================================================
+
+// --- Custom Violation ---
+let customViolationModule = null;
+function openCustomModal(mod) {
+  customViolationModule = mod;
+  document.getElementById('custom-violation-input').value = '';
+  document.getElementById('custom-violation-modal').classList.add('active');
+  setTimeout(() => document.getElementById('custom-violation-input').focus(), 100);
+}
+document.getElementById('btn-cancel-custom').addEventListener('click', () => document.getElementById('custom-violation-modal').classList.remove('active'));
+document.getElementById('btn-save-custom').addEventListener('click', () => {
+  const val = document.getElementById('custom-violation-input').value.trim();
+  if (!val) return;
+  document.getElementById('custom-violation-modal').classList.remove('active');
+  openViolationDetail(customViolationModule, val);
+});
+
+// --- Violation Detail ---
+let detailModule = null;
+const detailModal = document.getElementById('violation-detail-modal');
+const detailTime = document.getElementById('detail-time-input');
+const detailNotes = document.getElementById('detail-notes-input');
+const detailTitle = document.getElementById('detail-modal-title');
+const detailNotesLabel = document.getElementById('detail-notes-label');
+const busDispatchOpts = document.getElementById('bus-dispatch-options');
+const checkLate = document.getElementById('check-late');
+const checkNoInput = document.getElementById('check-no-input');
+
+function openViolationDetail(mod, type, editIdx = null) {
+  detailModule = mod;
+  const state = State[mod];
+  state.editingViolationIndex = editIdx;
+  const isEdit = editIdx !== null;
+  const existing = isEdit ? state.session.violations[editIdx] : null;
+  detailTitle.textContent = isEdit ? 'Edit Violation' : type;
+  detailTime.value = isEdit ? existing.timestamp : formatTime();
+  detailNotes.value = (isEdit && existing.notes) || '';
+  if (type === 'Bus Dispatch') {
+    busDispatchOpts.style.display = 'flex';
+    detailNotesLabel.textContent = 'Bus #';
+    checkLate.checked = isEdit && existing.isLate || false;
+    checkNoInput.checked = isEdit && existing.noInput || false;
+  } else {
+    busDispatchOpts.style.display = 'none';
+    detailNotesLabel.textContent = 'Notes (Optional)';
+    checkLate.checked = false; checkNoInput.checked = false;
+  }
+  detailModal.classList.add('active');
+  detailModal.dataset.currentType = type;
+  setTimeout(() => detailNotes.focus(), 100);
+}
+
+detailTime.addEventListener('click', () => openTimePicker(detailTime.value, v => detailTime.value = v));
+document.getElementById('btn-cancel-detail').addEventListener('click', () => { detailModal.classList.remove('active'); checkLate.checked = false; checkNoInput.checked = false; });
+document.getElementById('btn-save-detail').addEventListener('click', () => {
+  const state = State[detailModule];
+  const idx = state.editingViolationIndex;
+  const time = detailTime.value.trim();
+  const notes = detailNotes.value.trim();
+  const violation = {
+    type: idx === null ? detailModal.dataset.currentType : state.session.violations[idx].type,
+    timestamp: time, notes: notes, sortMinutes: timeToMinutes(time),
+    isLate: checkLate.checked, noInput: checkNoInput.checked
+  };
+  if (idx === null) state.session.violations.push(violation);
+  else state.session.violations[idx] = violation;
+  checkLate.checked = false; checkNoInput.checked = false;
+  detailModal.classList.remove('active');
+  state.editingViolationIndex = null;
+  if (detailModule === 'sw') { swRenderLog(); swSaveSession(); }
+  else { flRenderLog(); flSaveSession(); }
+});
+
+// --- Edit Session Modal ---
+let editModule = null;
+const editModal = document.getElementById('edit-session-modal');
+const editFields = document.getElementById('edit-session-fields');
+
+function openEditSessionModal(mod) {
+  editModule = mod;
+  editFields.innerHTML = '';
+  const s = State[mod].session;
+  if (mod === 'sw') {
+    editFields.innerHTML = `
+      <div class="input-group"><label>Supervisor Name:</label><input type="text" id="edit-f-sup" value="${s.supervisor}" /></div>
+      <div class="input-group"><label>Stop #:</label><input type="text" id="edit-f-stop" value="${s.stopNum}" /></div>
+      <div class="input-group"><label>Time Started:</label><input type="text" id="edit-f-time" value="${s.startTime}" readonly class="clickable-input" /></div>`;
+    setTimeout(() => document.getElementById('edit-f-time').addEventListener('click', () => openTimePicker(document.getElementById('edit-f-time').value, v => document.getElementById('edit-f-time').value = v)), 50);
+  } else {
+    editFields.innerHTML = `
+      <div class="input-group"><label>Bus Number:</label><input type="text" id="edit-f-bus" value="${s.busNumber}" /></div>
+      <div class="input-group"><label>Driver Name:</label><input type="text" id="edit-f-driver" value="${s.driverName}" /></div>
+      <div class="input-group"><label>Route:</label><input type="text" id="edit-f-route" value="${s.route}" /></div>
+      <div class="input-group"><label>Stop Boarded:</label><input type="text" id="edit-f-stop" value="${s.stopBoarded}" /></div>
+      <div class="input-group"><label>Time On:</label><input type="text" id="edit-f-time" value="${s.startTime}" readonly class="clickable-input" /></div>`;
+    setTimeout(() => document.getElementById('edit-f-time').addEventListener('click', () => openTimePicker(document.getElementById('edit-f-time').value, v => document.getElementById('edit-f-time').value = v)), 50);
+  }
+  editModal.classList.add('active');
+}
+
+document.getElementById('btn-cancel-edit-session').addEventListener('click', () => editModal.classList.remove('active'));
+document.getElementById('btn-save-edit-session').addEventListener('click', () => {
+  const s = State[editModule].session;
+  if (editModule === 'sw') {
+    s.supervisor = document.getElementById('edit-f-sup').value.trim();
+    s.stopNum = document.getElementById('edit-f-stop').value.trim();
+    s.startTime = document.getElementById('edit-f-time').value.trim();
+    swUpdateDisplay(); swSaveSession();
+  } else {
+    s.busNumber = document.getElementById('edit-f-bus').value.trim();
+    s.driverName = document.getElementById('edit-f-driver').value.trim();
+    s.route = document.getElementById('edit-f-route').value.trim();
+    s.stopBoarded = document.getElementById('edit-f-stop').value.trim();
+    s.startTime = document.getElementById('edit-f-time').value.trim();
+    flUpdateDisplay(); flSaveSession();
+  }
+  editModal.classList.remove('active');
+});
+
+// ===== KEYBOARD SHORTCUTS =====
+window.addEventListener('keydown', e => {
+  const modal = document.querySelector('.modal-overlay.active');
+  if (e.key === 'Escape') {
+    if (modal) modal.classList.remove('active');
+    return;
+  }
+  if (e.key === 'Enter') {
+    if (modal) { const btn = modal.querySelector('.btn-primary'); if (btn) btn.click(); return; }
+    if (views['login'].classList.contains('active')) { doLogin(); return; }
+  }
+});
+
+// ===== INIT =====
+initTimePicker();
