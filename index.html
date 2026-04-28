@@ -393,6 +393,7 @@
           <button class="violation-btn-sm" data-type="Sitting Down">Sitting Down</button>
           <button class="violation-btn-sm" data-type="Uniform">Uniform</button>
           <button class="violation-btn-sm custom-btn" id="sw-btn-custom-violation">Custom +</button>
+          <button class="violation-btn-sm note-btn" id="sw-btn-add-note" style="background:rgba(255,255,255,0.03); border:1px dashed rgba(255,255,255,0.15); color:var(--accent);">Note +</button>
         </div>
       </div>
       <div class="liquid-glass-container">
@@ -401,6 +402,13 @@
           <span id="sw-violation-count" class="count-badge">0 logged</span>
         </div>
         <ul id="sw-violation-list" class="log-list"></ul>
+      </div>
+      <div class="liquid-glass-container">
+        <div class="section-title-wrapper">
+          <h3 class="section-title">Notes</h3>
+          <span id="sw-notes-count" class="count-badge">0 notes</span>
+        </div>
+        <ul id="sw-notes-list" class="log-list"></ul>
       </div>
       <div class="action-footer">
         <button id="sw-btn-finish" class="btn-primary full-width">
@@ -506,6 +514,7 @@
           <button class="violation-btn-sm" data-type="Uniform">Uniform</button>
           <button class="violation-btn-sm" data-type="Took off while customers standing">Took off standing</button>
           <button class="violation-btn-sm custom-btn" id="fl-btn-custom-violation">Custom +</button>
+          <button class="violation-btn-sm note-btn" id="fl-btn-add-note" style="background:rgba(255,255,255,0.03); border:1px dashed rgba(255,255,255,0.15); color:var(--accent);">Note +</button>
         </div>
       </div>
       <div class="liquid-glass-container">
@@ -514,6 +523,13 @@
           <span id="fl-violation-count" class="count-badge">0 logged</span>
         </div>
         <ul id="fl-violation-list" class="log-list"></ul>
+      </div>
+      <div class="liquid-glass-container">
+        <div class="section-title-wrapper">
+          <h3 class="section-title">Notes</h3>
+          <span id="fl-notes-count" class="count-badge">0 notes</span>
+        </div>
+        <ul id="fl-notes-list" class="log-list"></ul>
       </div>
       <div class="action-footer">
         <button id="fl-btn-finish" class="btn-primary full-width">
@@ -555,6 +571,18 @@
     </div>
   </div>
 
+  <!-- Note Modal -->
+  <div id="note-modal" class="modal-overlay">
+    <div class="modal card">
+      <header class="modal-header"><h3>Add Note</h3><p class="subtitle" style="margin-bottom:0;">This will appear in the Notes section of your report</p></header>
+      <div class="input-group"><label for="note-input">Note</label><textarea id="note-input" placeholder="Type your note..." rows="3"></textarea></div>
+      <div class="modal-actions">
+        <button id="btn-cancel-note" class="btn-secondary">Cancel</button>
+        <button id="btn-save-note" class="btn-primary">Add Note</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Violation Detail Modal -->
   <div id="violation-detail-modal" class="modal-overlay">
     <div class="modal card">
@@ -570,6 +598,16 @@
         <label style="display:flex;align-items:center;gap:.5rem;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="check-no-input" style="width:1.2rem;height:1.2rem;"> <span>Didn't Input</span></label>
       </div>
       <div class="input-group"><label for="detail-notes-input" id="detail-notes-label">Notes (Optional)</label><textarea id="detail-notes-input" placeholder="Type here..." rows="2"></textarea></div>
+      <div id="standing-action-options" style="display:none; margin-bottom:1rem;">
+        <div style="font-size:0.75rem; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:0.6rem;">Action Status</div>
+        <div style="display:flex; gap:1rem; margin-bottom:0.5rem;">
+          <label style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" id="radio-no-action" style="width:1.2rem;height:1.2rem;"> <span>No Action Taken</span></label>
+          <label style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" id="radio-action-taken" style="width:1.2rem;height:1.2rem;"> <span>Action Taken</span></label>
+        </div>
+        <div id="action-desc-group" style="display:none;">
+          <div class="input-group"><label for="action-description-input">Describe Action</label><input type="text" id="action-description-input" placeholder="e.g. Told passengers to sit down" /></div>
+        </div>
+      </div>
       <div class="modal-actions">
         <button id="btn-cancel-detail" class="btn-secondary">Cancel</button>
         <button id="btn-save-detail" class="btn-primary">Save Violation</button>

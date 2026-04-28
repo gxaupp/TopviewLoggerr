@@ -8,14 +8,14 @@ const State = {
   activeModule: null, // 'sw' or 'fl'
   // Stopwatch state
   sw: {
-    session: { inspector:'', supervisor:'', stopNum:'', startTime:null, endTime:null, violations:[] },
+    session: { inspector:'', supervisor:'', stopNum:'', startTime:null, endTime:null, violations:[], notes:[] },
     editingViolationIndex: null,
     editingSavedReportIndex: null,
     savedReports: []
   },
   // Full Loop state
   fl: {
-    session: { inspector:'', busNumber:'', driverName:'', route:'', stopBoarded:'', startTime:null, endTime:null, violations:[] },
+    session: { inspector:'', busNumber:'', driverName:'', route:'', stopBoarded:'', startTime:null, endTime:null, violations:[], notes:[] },
     editingViolationIndex: null,
     editingSavedReportIndex: null,
     savedReports: [],
@@ -46,6 +46,8 @@ const timeToMinutes = (s) => {
   return h * 60 + m;
 };
 const stripAmPm = (s) => s ? s.replace(/\s*(AM|PM)/gi, '') : '';
+const stripLeadingZero = (s) => s ? s.replace(/\b0(\d:)/g, '$1') : '';
+const formatReportTime = (s) => stripLeadingZero(stripAmPm(s));
 const daysBetween = (d1, d2) => Math.floor(Math.abs(d2-d1) / (1000*60*60*24));
 
 // ===== VIEW NAVIGATION =====
@@ -1078,7 +1080,7 @@ document.getElementById('sw-btn-start-new').addEventListener('click', () => {
   showView('sw-new');
 });
 
-document.getElementById('sw-btn-resume').addEventListener('click', () => { swUpdateDisplay(); swRenderLog(); showView('sw-session'); });
+document.getElementById('sw-btn-resume').addEventListener('click', () => { swUpdateDisplay(); swRenderLog(); swRenderNotes(); showView('sw-session'); });
 document.getElementById('sw-btn-view-all').addEventListener('click', () => { swRenderHistory(); showView('sw-history'); });
 
 // Time input click
@@ -1093,8 +1095,8 @@ document.getElementById('sw-btn-confirm-start').addEventListener('click', () => 
   const time = document.getElementById('sw-time-started').value.trim();
   if (!sup || !stop) { alert('Please fill in all fields'); return; }
   State.sw.editingSavedReportIndex = null;
-  State.sw.session = { inspector: State.currentUser, supervisor: sup, stopNum: stop, startTime: time, endTime: null, violations: [] };
-  swUpdateDisplay(); swRenderLog(); swSaveSession();
+  State.sw.session = { inspector: State.currentUser, supervisor: sup, stopNum: stop, startTime: time, endTime: null, violations: [], notes: [] };
+  swUpdateDisplay(); swRenderLog(); swRenderNotes(); swSaveSession();
   showView('sw-session');
 });
 
@@ -1105,10 +1107,11 @@ function swUpdateDisplay() {
 }
 
 // Violation buttons
-document.querySelectorAll('#sw-violation-grid .violation-btn-sm:not(.custom-btn)').forEach(btn => {
+document.querySelectorAll('#sw-violation-grid .violation-btn-sm:not(.custom-btn):not(.note-btn)').forEach(btn => {
   btn.addEventListener('click', () => openViolationDetail('sw', btn.dataset.type));
 });
 document.getElementById('sw-btn-custom-violation').addEventListener('click', () => openCustomModal('sw'));
+document.getElementById('sw-btn-add-note').addEventListener('click', () => openNoteModal('sw'));
 
 // Edit session
 document.getElementById('sw-btn-edit-session').addEventListener('click', () => {
@@ -1150,39 +1153,70 @@ function swRenderLog() {
   });
 }
 
+function swRenderNotes() {
+  const list = document.getElementById('sw-notes-list');
+  const badge = document.getElementById('sw-notes-count');
+  const notes = State.sw.session.notes || [];
+  badge.textContent = `${notes.length} note${notes.length !== 1 ? 's' : ''}`;
+  list.innerHTML = '';
+  if (notes.length === 0) {
+    list.innerHTML = `<div style="text-align:center;padding:2rem 1rem;opacity:.3;"><p style="font-size:.75rem;">No notes added</p></div>`;
+    return;
+  }
+  notes.forEach((note, idx) => {
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    li.innerHTML = `<div class="log-content"><span class="type" style="color:var(--accent);">📝 Note</span><span class="log-notes">${note}</span></div><div class="log-meta"><button class="icon-btn-sm sw-del-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.querySelector('.sw-del-note').onclick = () => {
+      State.sw.session.notes.splice(idx, 1);
+      swRenderNotes(); swSaveSession();
+    };
+    list.appendChild(li);
+  });
+}
+
 function swGenerateReport(s) {
   let r = `SESSION DETAILS:\n`;
   r += `----------------\n`;
   r += `Date: ${s.date || new Date().toLocaleDateString()}\n`;
   r += `Supervisor: ${s.supervisor}\n`;
   r += `Stop #: ${s.stopNum}\n`;
-  r += `Time Started: ${stripAmPm(s.startTime)}\n`;
-  r += `Time Ended: ${stripAmPm(s.endTime)}\n\n\n`;
+  r += `Time Started: ${formatReportTime(s.startTime)}\n`;
+  r += `Time Ended: ${formatReportTime(s.endTime)}\n\n\n`;
   r += `VIOLATIONS LOG:\n`;
   r += `---------------\n`;
-  if (s.violations.length === 0) { r += 'No violations recorded.\n'; return r; }
-  const sorted = [...s.violations].sort((a,b) => a.sortMinutes - b.sortMinutes);
-  const groups = {};
-  sorted.forEach(v => { if (!groups[v.type]) groups[v.type] = []; groups[v.type].push(v); });
-  Object.keys(groups).forEach(type => {
-    if (type === 'Bus Dispatch') {
-      const accurate = groups[type].filter(v => !v.isLate && !v.noInput);
-      const inaccurate = groups[type].filter(v => v.isLate || v.noInput);
-      if (accurate.length > 0) r += `Accurate updates to dispatch: ${accurate.map(v => `${v.notes}(${stripAmPm(v.timestamp)})`).join(', ')}\n`;
-      if (inaccurate.length > 0) {
-        r += `Inaccurate updates to dispatch: ${inaccurate.map(v => {
-          const tags = []; if (v.isLate) tags.push('Late'); if (v.noInput) tags.push("Didnt Input");
-          return `${v.notes}(${stripAmPm(v.timestamp)},${tags.join('/')})`;
-        }).join(', ')}\n`;
+  if (s.violations.length === 0) { r += 'No violations recorded.\n'; }
+  else {
+    const sorted = [...s.violations].sort((a,b) => a.sortMinutes - b.sortMinutes);
+    const groups = {};
+    sorted.forEach(v => { if (!groups[v.type]) groups[v.type] = []; groups[v.type].push(v); });
+    Object.keys(groups).forEach(type => {
+      if (type === 'Bus Dispatch') {
+        const accurate = groups[type].filter(v => !v.isLate && !v.noInput);
+        const inaccurate = groups[type].filter(v => v.isLate || v.noInput);
+        if (accurate.length > 0) r += `Accurate updates to dispatch: ${accurate.map(v => `${v.notes}(${formatReportTime(v.timestamp)})`).join(', ')}\n`;
+        if (inaccurate.length > 0) {
+          r += `Inaccurate updates to dispatch: ${inaccurate.map(v => {
+            const tags = []; if (v.isLate) tags.push('Late'); if (v.noInput) tags.push("Didnt Input");
+            return `${v.notes}(${formatReportTime(v.timestamp)},${tags.join('/')})`;
+          }).join(', ')}\n`;
+        }
+      } else if (type === 'Uniform') {
+        const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
+        if (notes) r += `${notes}\n`;
+      } else {
+        const times = groups[type].map(v => { const n = v.notes ? ` (${v.notes})` : ''; return `${formatReportTime(v.timestamp)}${n}`; });
+        r += `[${times.join(', ')}] || ${type}\n`;
       }
-    } else if (type === 'Uniform') {
-      const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
-      if (notes) r += `${notes}\n`;
-    } else {
-      const times = groups[type].map(v => { const n = v.notes ? ` (${v.notes})` : ''; return `${stripAmPm(v.timestamp)}${n}`; });
-      r += `[${times.join(', ')}] || ${type}\n`;
-    }
-  });
+    });
+  }
+  // Notes section
+  const notes = s.notes || [];
+  if (notes.length > 0) {
+    r += `\n\nNOTES:\n`;
+    r += `------\n`;
+    notes.forEach(n => { r += `${n}\n`; });
+  }
   return r;
 }
 
@@ -1262,7 +1296,7 @@ document.getElementById('fl-btn-start-new').addEventListener('click', () => {
   document.getElementById('fl-time-started').value = formatTime();
   showView('fl-new');
 });
-document.getElementById('fl-btn-resume').addEventListener('click', () => { flUpdateDisplay(); flRenderLog(); showView('fl-session'); });
+document.getElementById('fl-btn-resume').addEventListener('click', () => { flUpdateDisplay(); flRenderLog(); flRenderNotes(); showView('fl-session'); });
 document.getElementById('fl-btn-view-all').addEventListener('click', () => { flRenderHistory(); showView('fl-history'); });
 
 document.getElementById('fl-time-started').addEventListener('click', () => {
@@ -1277,9 +1311,9 @@ document.getElementById('fl-btn-confirm-start').addEventListener('click', () => 
   const time = document.getElementById('fl-time-started').value.trim();
   if (!bus || !driver) { alert('Please fill in Bus Number and Driver Name'); return; }
   State.fl.editingSavedReportIndex = null;
-  State.fl.session = { inspector: State.currentUser, busNumber: bus, driverName: driver, route: route || '', stopBoarded: stop || '', startTime: time, endTime: null, violations: [] };
+  State.fl.session = { inspector: State.currentUser, busNumber: bus, driverName: driver, route: route || '', stopBoarded: stop || '', startTime: time, endTime: null, violations: [], notes: [] };
   flUpsertDriver(driver);
-  flUpdateDisplay(); flRenderLog(); flSaveSession();
+  flUpdateDisplay(); flRenderLog(); flRenderNotes(); flSaveSession();
   showView('fl-session');
 });
 
@@ -1291,10 +1325,11 @@ function flUpdateDisplay() {
 }
 
 // Violation buttons
-document.querySelectorAll('#fl-violation-grid .violation-btn-sm:not(.custom-btn)').forEach(btn => {
+document.querySelectorAll('#fl-violation-grid .violation-btn-sm:not(.custom-btn):not(.note-btn)').forEach(btn => {
   btn.addEventListener('click', () => openViolationDetail('fl', btn.dataset.type));
 });
 document.getElementById('fl-btn-custom-violation').addEventListener('click', () => openCustomModal('fl'));
+document.getElementById('fl-btn-add-note').addEventListener('click', () => openNoteModal('fl'));
 
 // Edit session
 document.getElementById('fl-btn-edit-session').addEventListener('click', () => openEditSessionModal('fl'));
@@ -1341,11 +1376,37 @@ function flRenderLog() {
     const idx = violations.indexOf(v);
     const li = document.createElement('li');
     li.className = 'log-item';
-    li.innerHTML = `<div class="log-content"><span class="type">${v.type}</span>${v.notes ? `<span class="log-notes">${v.notes}</span>` : ''}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm fl-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    let label = v.type;
+    // Show standing action status
+    if (v.standingAction === 'taken') label += ` (Action Taken)`;
+    else if (v.standingAction === 'none') label += ` (No Action Taken)`;
+    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${v.notes ? `<span class="log-notes">${v.notes}</span>` : ''}${v.actionDescription ? `<span class="log-notes" style="color:var(--accent);">${v.actionDescription}</span>` : ''}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm fl-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
     li.querySelector('.fl-edit-log').onclick = () => openViolationDetail('fl', v.type, idx);
     li.querySelector('.fl-del-log').onclick = () => {
       State.fl.session.violations.splice(idx, 1);
       flRenderLog(); flSaveSession();
+    };
+    list.appendChild(li);
+  });
+}
+
+function flRenderNotes() {
+  const list = document.getElementById('fl-notes-list');
+  const badge = document.getElementById('fl-notes-count');
+  const notes = State.fl.session.notes || [];
+  badge.textContent = `${notes.length} note${notes.length !== 1 ? 's' : ''}`;
+  list.innerHTML = '';
+  if (notes.length === 0) {
+    list.innerHTML = `<div style="text-align:center;padding:2rem 1rem;opacity:.3;"><p style="font-size:.75rem;">No notes added</p></div>`;
+    return;
+  }
+  notes.forEach((note, idx) => {
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    li.innerHTML = `<div class="log-content"><span class="type" style="color:var(--accent);">📝 Note</span><span class="log-notes">${note}</span></div><div class="log-meta"><button class="icon-btn-sm fl-del-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.querySelector('.fl-del-note').onclick = () => {
+      State.fl.session.notes.splice(idx, 1);
+      flRenderNotes(); flSaveSession();
     };
     list.appendChild(li);
   });
@@ -1358,25 +1419,44 @@ function flGenerateReport(s) {
   r += `Bus Driver: ${s.driverName}\n`;
   r += `Route: ${s.route}\n`;
   r += `Stop Boarded: ${s.stopBoarded}\n`;
-  r += `Time Boarded: ${stripAmPm(s.startTime)}\n`;
-  r += `Time Off: ${s.endTime ? stripAmPm(s.endTime) : 'N/A'}\n\n`;
+  r += `Time Boarded: ${formatReportTime(s.startTime)}\n`;
+  r += `Time Off: ${s.endTime ? formatReportTime(s.endTime) : 'N/A'}\n\n`;
   r += `VIOLATIONS LOG (${s.violations.length})\n`;
   r += `--------------------------------\n`;
-  if (s.violations.length === 0) { r += 'No violations recorded.\n'; return r; }
-  const sorted = [...s.violations].sort((a,b) => a.sortMinutes - b.sortMinutes);
-  const groups = {};
-  sorted.forEach(v => { if (!groups[v.type]) groups[v.type] = []; groups[v.type].push(v); });
-  // Sort groups by earliest violation
-  const sortedKeys = Object.keys(groups).sort((a,b) => groups[a][0].sortMinutes - groups[b][0].sortMinutes);
-  sortedKeys.forEach(type => {
-    if (type.toLowerCase() === 'uniform') {
-      const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
-      if (notes) r += `${notes}\n`; else r += `Uniform violation (${groups[type].length})\n`;
-    } else {
-      const times = groups[type].map(v => { const n = v.notes ? ` (${v.notes})` : ''; return `${stripAmPm(v.timestamp)}${n}`; });
-      r += `[${times.join(', ')}] || ${type}\n`;
-    }
-  });
+  if (s.violations.length === 0) { r += 'No violations recorded.\n'; }
+  else {
+    const sorted = [...s.violations].sort((a,b) => a.sortMinutes - b.sortMinutes);
+    const groups = {};
+    sorted.forEach(v => { if (!groups[v.type]) groups[v.type] = []; groups[v.type].push(v); });
+    const sortedKeys = Object.keys(groups).sort((a,b) => groups[a][0].sortMinutes - groups[b][0].sortMinutes);
+    sortedKeys.forEach(type => {
+      if (type.toLowerCase() === 'uniform') {
+        const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
+        if (notes) r += `${notes}\n`; else r += `Uniform violation (${groups[type].length})\n`;
+      } else {
+        const isStanding = type.toLowerCase().includes('standing');
+        const times = groups[type].map(v => {
+          let extra = '';
+          if (isStanding && v.standingAction === 'taken') {
+            extra = ` (Action Taken${v.actionDescription ? ',' + v.actionDescription : ''})`;
+          } else if (isStanding && v.standingAction === 'none') {
+            extra = ` (No Action Taken)`;
+          } else if (v.notes) {
+            extra = ` (${v.notes})`;
+          }
+          return `${formatReportTime(v.timestamp)}${extra}`;
+        });
+        r += `[${times.join(', ')}] || ${type}\n`;
+      }
+    });
+  }
+  // Notes section
+  const notes = s.notes || [];
+  if (notes.length > 0) {
+    r += `\n\nNOTES:\n`;
+    r += `------\n`;
+    notes.forEach(n => { r += `${n}\n`; });
+  }
   return r;
 }
 
@@ -1457,6 +1537,26 @@ document.getElementById('btn-save-custom').addEventListener('click', () => {
   openViolationDetail(customViolationModule, val);
 });
 
+// --- Note Modal ---
+let noteModule = null;
+function openNoteModal(mod) {
+  noteModule = mod;
+  document.getElementById('note-input').value = '';
+  document.getElementById('note-modal').classList.add('active');
+  setTimeout(() => document.getElementById('note-input').focus(), 100);
+}
+document.getElementById('btn-cancel-note').addEventListener('click', () => document.getElementById('note-modal').classList.remove('active'));
+document.getElementById('btn-save-note').addEventListener('click', () => {
+  const val = document.getElementById('note-input').value.trim();
+  if (!val) return;
+  document.getElementById('note-modal').classList.remove('active');
+  const state = State[noteModule];
+  if (!state.session.notes) state.session.notes = [];
+  state.session.notes.push(val);
+  if (noteModule === 'sw') { swRenderNotes(); swSaveSession(); }
+  else { flRenderNotes(); flSaveSession(); }
+});
+
 // --- Violation Detail ---
 let detailModule = null;
 const detailModal = document.getElementById('violation-detail-modal');
@@ -1467,6 +1567,24 @@ const detailNotesLabel = document.getElementById('detail-notes-label');
 const busDispatchOpts = document.getElementById('bus-dispatch-options');
 const checkLate = document.getElementById('check-late');
 const checkNoInput = document.getElementById('check-no-input');
+const standingActionOpts = document.getElementById('standing-action-options');
+const radioNoAction = document.getElementById('radio-no-action');
+const radioActionTaken = document.getElementById('radio-action-taken');
+const actionDescInput = document.getElementById('action-description-input');
+const actionDescGroup = document.getElementById('action-desc-group');
+
+// Radio mutual exclusivity + show/hide text input
+radioNoAction.addEventListener('change', () => {
+  if (radioNoAction.checked) { radioActionTaken.checked = false; actionDescGroup.style.display = 'none'; }
+});
+radioActionTaken.addEventListener('change', () => {
+  if (radioActionTaken.checked) { radioNoAction.checked = false; actionDescGroup.style.display = 'block'; setTimeout(() => actionDescInput.focus(), 100); }
+});
+
+function isStandingType(type) {
+  const t = type.toLowerCase();
+  return t.includes('standing');
+}
 
 function openViolationDetail(mod, type, editIdx = null) {
   detailModule = mod;
@@ -1487,26 +1605,54 @@ function openViolationDetail(mod, type, editIdx = null) {
     detailNotesLabel.textContent = 'Notes (Optional)';
     checkLate.checked = false; checkNoInput.checked = false;
   }
+  // Standing action options (Full Loop only)
+  if (isStandingType(type) && mod === 'fl') {
+    standingActionOpts.style.display = 'block';
+    radioNoAction.checked = isEdit && existing.standingAction === 'none' || false;
+    radioActionTaken.checked = isEdit && existing.standingAction === 'taken' || false;
+    actionDescInput.value = (isEdit && existing.actionDescription) || '';
+    actionDescGroup.style.display = radioActionTaken.checked ? 'block' : 'none';
+  } else {
+    standingActionOpts.style.display = 'none';
+    radioNoAction.checked = false; radioActionTaken.checked = false;
+    actionDescInput.value = '';
+    actionDescGroup.style.display = 'none';
+  }
   detailModal.classList.add('active');
   detailModal.dataset.currentType = type;
   setTimeout(() => detailNotes.focus(), 100);
 }
 
 detailTime.addEventListener('click', () => openTimePicker(detailTime.value, v => detailTime.value = v));
-document.getElementById('btn-cancel-detail').addEventListener('click', () => { detailModal.classList.remove('active'); checkLate.checked = false; checkNoInput.checked = false; });
+document.getElementById('btn-cancel-detail').addEventListener('click', () => { detailModal.classList.remove('active'); checkLate.checked = false; checkNoInput.checked = false; radioNoAction.checked = false; radioActionTaken.checked = false; });
 document.getElementById('btn-save-detail').addEventListener('click', () => {
   const state = State[detailModule];
   const idx = state.editingViolationIndex;
   const time = detailTime.value.trim();
   const notes = detailNotes.value.trim();
+  const type = idx === null ? detailModal.dataset.currentType : state.session.violations[idx].type;
   const violation = {
-    type: idx === null ? detailModal.dataset.currentType : state.session.violations[idx].type,
+    type: type,
     timestamp: time, notes: notes, sortMinutes: timeToMinutes(time),
     isLate: checkLate.checked, noInput: checkNoInput.checked
   };
+  // Standing action fields
+  if (isStandingType(type) && detailModule === 'fl') {
+    if (radioActionTaken.checked) {
+      violation.standingAction = 'taken';
+      violation.actionDescription = actionDescInput.value.trim();
+    } else if (radioNoAction.checked) {
+      violation.standingAction = 'none';
+      violation.actionDescription = '';
+    } else {
+      violation.standingAction = '';
+      violation.actionDescription = '';
+    }
+  }
   if (idx === null) state.session.violations.push(violation);
   else state.session.violations[idx] = violation;
   checkLate.checked = false; checkNoInput.checked = false;
+  radioNoAction.checked = false; radioActionTaken.checked = false;
   detailModal.classList.remove('active');
   state.editingViolationIndex = null;
   if (detailModule === 'sw') { swRenderLog(); swSaveSession(); }
