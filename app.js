@@ -208,9 +208,16 @@ function updateStorageCount() {
 // ===== LOGIN =====
 document.getElementById('btn-login-confirm').addEventListener('click', doLogin);
 function doLogin() {
+  console.log("doLogin called");
   const input = document.getElementById('username');
   const name = input.value.trim();
-  if (!name) { input.style.borderColor = 'red'; setTimeout(() => input.style.borderColor = '', 1000); return; }
+  if (!name) { 
+    console.log("No name entered");
+    input.style.borderColor = 'red'; 
+    setTimeout(() => input.style.borderColor = '', 1000); 
+    return; 
+  }
+  console.log("Logging in as:", name);
   State.currentUser = name;
   localStorage.setItem(KEYS.USER, name);
   document.getElementById('menu-welcome').textContent = `Hello, ${name}`;
@@ -1715,8 +1722,20 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Enter') {
-    if (modal) { const btn = modal.querySelector('.btn-primary'); if (btn) btn.click(); return; }
-    if (views['login'].classList.contains('active')) { doLogin(); return; }
+    console.log("Enter key pressed");
+    if (modal) { 
+      const btn = modal.querySelector('.btn-primary'); 
+      if (btn) {
+        console.log("Triggering modal primary button");
+        btn.click(); 
+        return; 
+      }
+    }
+    if (views['login'] && views['login'].classList.contains('active')) { 
+      console.log("Triggering login from Enter key");
+      doLogin(); 
+      return; 
+    }
   }
 });
 
