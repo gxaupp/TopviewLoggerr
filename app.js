@@ -2,6 +2,13 @@
    TOPVIEW LOGGER — Combined App JavaScript
    ============================================================ */
 
+window.onerror = function(msg, url, lineNo, columnNo, error) {
+  alert('Error: ' + msg + '\nLine: ' + lineNo + '\nURL: ' + url);
+  return false;
+};
+
+console.log("App.js loading...");
+
 // ===== STATE =====
 const State = {
   currentUser: null,
@@ -224,6 +231,10 @@ function doLogin() {
   loadAllData();
   showView('menu');
 }
+
+window.doLogin = doLogin;
+window.showView = showView;
+window.State = State;
 
 // Auto-login
 (function checkAutoLogin() {
