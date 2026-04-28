@@ -1574,12 +1574,14 @@ const actionDescInput = document.getElementById('action-description-input');
 const actionDescGroup = document.getElementById('action-desc-group');
 
 // Radio mutual exclusivity + show/hide text input
-radioNoAction.addEventListener('change', () => {
-  if (radioNoAction.checked) { radioActionTaken.checked = false; actionDescGroup.style.display = 'none'; }
-});
-radioActionTaken.addEventListener('change', () => {
-  if (radioActionTaken.checked) { radioNoAction.checked = false; actionDescGroup.style.display = 'block'; setTimeout(() => actionDescInput.focus(), 100); }
-});
+if (radioNoAction && radioActionTaken) {
+  radioNoAction.addEventListener('change', () => {
+    if (radioNoAction.checked) { radioActionTaken.checked = false; actionDescGroup.style.display = 'none'; }
+  });
+  radioActionTaken.addEventListener('change', () => {
+    if (radioActionTaken.checked) { radioNoAction.checked = false; actionDescGroup.style.display = 'block'; setTimeout(() => actionDescInput.focus(), 100); }
+  });
+}
 
 function isStandingType(type) {
   const t = type.toLowerCase();
@@ -1719,4 +1721,7 @@ window.addEventListener('keydown', e => {
 });
 
 // ===== INIT =====
+console.log("Topview Logger V1.3.0 initializing...");
 initTimePicker();
+updateStorageCount();
+console.log("Topview Logger V1.3.0 operational.");
