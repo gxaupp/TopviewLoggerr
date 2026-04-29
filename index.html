@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Topview Logger</title>
-  <link rel="stylesheet" href="styles.css" />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon-512.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Topview" />
   <meta name="theme-color" content="#0a0a0a" />
+  <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <svg style="display:none">
@@ -50,6 +50,10 @@
 </head>
 <body>
 <div id="app">
+  <div style="position:fixed; top:10px; right:10px; z-index:9999; background:#f39c12; color:black; font-size:10px; font-weight:900; padding:4px 10px; border-radius:6px; letter-spacing:1px; box-shadow:0 4px 15px rgba(0,0,0,0.5); pointer-events:none; display: flex; align-items: center; gap: 5px;">
+    <div style="width:6px; height:6px; background:black; border-radius:50%; animation: pulse 1s infinite;"></div>
+    BETA TEST VERSION
+  </div>
 
   <!-- ============ LOGIN VIEW ============ -->
   <main id="login-view" class="view active">
@@ -263,9 +267,15 @@
       <div class="liquid-glass-container" style="margin-bottom: 1.5rem;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
           <h3 class="section-title" style="margin: 0;">Configuration</h3>
-          <div id="tracker-api-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4);">
-            <div class="status-dot"></div>
-            <span>Waiting...</span>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+            <div id="tracker-api-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4);">
+              <div class="status-dot"></div>
+              <span>Waiting...</span>
+            </div>
+            <div id="tracker-dispatch-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); font-size: 0.65rem; padding: 2px 8px;">
+              <div class="status-dot" style="width: 6px; height: 6px;"></div>
+              <span>Dispatch Idle</span>
+            </div>
           </div>
         </div>
         <div class="input-group">
@@ -709,7 +719,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
-<script type="module" src="samsara_engine.js?v=v1_3_features"></script>
+<!-- Removed duplicate script tags handled by ESM imports in app.js -->
 <script type="module" src="app.js?v=v1_3_features"></script>
 </body>
 </html>

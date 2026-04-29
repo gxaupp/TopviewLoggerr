@@ -7,7 +7,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
   return false;
 };
 
-console.log("App.js loading...");
+import DispatchEngine from './dispatch_engine.js';
+import SamsaraEngine from './samsara_engine.js';
+
+console.log("App.js loading (ESM Mode)...");
 
 // ===== STATE =====
 const State = {
@@ -230,6 +233,13 @@ function doLogin() {
   document.getElementById('menu-welcome').textContent = `Hello, ${name}`;
   loadAllData();
   showView('menu');
+  
+  // AUTO-CONNECT: Background CountIf link even on fresh login
+  console.log("[Login] Triggering background CountIf link...");
+  setTimeout(() => {
+     const connectBtn = document.getElementById('btn-countif-connect');
+     if (connectBtn) connectBtn.click();
+  }, 300);
 }
 
 window.doLogin = doLogin;
@@ -244,6 +254,13 @@ window.State = State;
     document.getElementById('menu-welcome').textContent = `Hello, ${saved}`;
     loadAllData();
     showView('menu');
+    
+    // AUTO-CONNECT: Background CountIf link
+    console.log("[AutoLogin] Triggering background CountIf link...");
+    setTimeout(() => {
+       const connectBtn = document.getElementById('btn-countif-connect');
+       if (connectBtn) connectBtn.click();
+    }, 500);
   }
 })();
 
@@ -278,8 +295,94 @@ document.getElementById('btn-goto-tracker').addEventListener('click', () => {
   }
   
   // Necessary for Leaflet to recalculate its dimensions after being unhidden
-  setTimeout(() => trackerMap.invalidateSize(), 300);
+  setTimeout(() => {
+    trackerMap.invalidateSize();
+    // AUTO-START SCAN: Pre-emptively load fleet positions
+    console.log("[Tracker] Auto-initiating fleet discovery...");
+    runFleetScan(); 
+  }, 50);
 });
+
+async function runFleetScan() {
+  const btn = document.getElementById('btn-show-all-buses');
+  if (!btn) return;
+  const orgText = btn.innerHTML;
+  const apiKey = DEFAULTS.SAMSARA_API;
+  
+  if (!apiKey) return;
+  const statusBadge = document.getElementById('tracker-api-status');
+  
+  btn.innerHTML = '<span>Scanning Fleet...</span>';
+  statusBadge.style.background = 'rgba(241, 196, 15, 0.2)';
+  statusBadge.style.color = '#f1c40f';
+  statusBadge.innerHTML = '<div class="status-dot" style="background:#f1c40f;"></div><span>Connecting...</span>';
+  
+  trackerMarkers.forEach(m => trackerMap.removeLayer(m));
+  trackerMarkers = [];
+  
+  try {
+     document.getElementById('tracker-results-container').style.display = 'block';
+     // Pull all buses globally using large limit fallback
+     const rawBuses = await SamsaraEngine.findBusesNearStop(0, 0, apiKey, 500);
+     
+     // ENRICHMENT: Link every bus with driver data from portalData
+     const closestBuses = rawBuses.map(bus => {
+        // CRITICAL: Must use bus.name (e.g. '4205') for matching, not internal bus.id
+        return DispatchEngine.getEnrichedStatus(bus, bus.name, portalData);
+     });
+     
+     statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+     statusBadge.style.color = '#2ecc71';
+     statusBadge.innerHTML = `<div class="status-dot" style="background:#2ecc71;"></div><span>Fleet Scan Active</span>`;
+     
+     document.getElementById('tracker-last-stop').parentElement.querySelector('.stat-label').textContent = 'TOTAL SCANNED';
+     document.getElementById('tracker-next-stop').parentElement.querySelector('.stat-label').textContent = 'ACTIVE BUSES';
+     document.getElementById('tracker-last-stop').textContent = closestBuses.length;
+     document.getElementById('tracker-next-stop').textContent = "Map Updated";
+     
+     const timeEl = document.getElementById('tracker-active-time');
+     timeEl.textContent = `Live`;
+     timeEl.style.color = '#2ecc71';
+     document.getElementById('tracker-street-addr').textContent = `Showing all ${closestBuses.length} active buses`;
+     
+     closestBuses.forEach(bus => {
+       const pos = [bus.latitude, bus.longitude];
+       const driverLabel = bus.operator !== "Unknown Driver" ? ` | ${bus.operator}` : "";
+       
+       const customIcon = L.divIcon({
+          html: `
+            <div class="bus-marker-wrapper">
+              <div class="bus-number-label">${bus.name}${driverLabel}</div>
+              <div class="bus-beacon">
+                <div class="bus-dot-core"></div>
+                <div class="bus-pulse-ring"></div>
+              </div>
+            </div>
+          `,
+          className: 'bus-custom-marker',
+          iconSize: [40, 40],
+          iconAnchor: [20, 36] 
+       });
+       const marker = L.marker(pos, { icon: customIcon }).addTo(trackerMap);
+       trackerMarkers.push(marker);
+     });
+     
+     trackerMap.setView([40.759433036950966, -73.98454271585518], 14, { animate: true });
+     setTimeout(() => trackerMap.invalidateSize(), 100);
+     
+     btn.innerHTML = `
+       <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-bus"/></svg>
+       <span>All Buses Displayed</span>
+     `;
+     setTimeout(() => btn.innerHTML = orgText, 2500);
+     
+  } catch(e) {
+     statusBadge.style.background = 'rgba(231, 76, 60, 0.2)';
+     statusBadge.style.color = '#e74c3c';
+     statusBadge.innerHTML = `<div class="status-dot" style="background:#e74c3c;"></div><span>${e.message}</span>`;
+     btn.innerHTML = orgText;
+  }
+}
 
 // ============================================================
 // COUNTIF CONNECT MODULE
@@ -359,18 +462,31 @@ function countifSetStep(stepName, state) {
 
 function countifSetBadge(text, color) {
   const badge = document.getElementById('countif-status-badge');
+  const trackerBadge = document.getElementById('tracker-dispatch-status');
+  
   const colorMap = {
     yellow: { bg: 'rgba(241, 196, 15, 0.2)', fg: '#f1c40f' },
     green: { bg: 'rgba(46, 204, 113, 0.2)', fg: '#2ecc71' },
     red: { bg: 'rgba(231, 76, 60, 0.2)', fg: '#e74c3c' }
   };
   const c = colorMap[color] || colorMap.yellow;
-  badge.style.background = c.bg;
-  badge.style.color = c.fg;
-  badge.innerHTML = `<div class="status-dot" style="background:${c.fg};"></div><span>${text}</span>`;
+  
+  // Update main badge
+  if (badge) {
+    badge.style.background = c.bg;
+    badge.style.color = c.fg;
+    badge.innerHTML = `<div class="status-dot" style="background:${c.fg};"></div><span>${text}</span>`;
+  }
+  
+  // Update Tracker badge
+  if (trackerBadge) {
+    trackerBadge.style.background = c.bg;
+    trackerBadge.style.color = c.fg;
+    trackerBadge.innerHTML = `<div class="status-dot" style="width:6px; height:6px; background:${c.fg};"></div><span>${text}</span>`;
+  }
 }
 
-let portalSessionCookie = null;
+let portalSessionCookie = localStorage.getItem('portal_session_cookie');
 let portalData = [];
 
 async function fetchDispatchData(contextLabel = 'Data') {
@@ -392,18 +508,21 @@ async function fetchDispatchData(contextLabel = 'Data') {
   syncProgress.classList.add('sync-anim');
 
   try {
-    const result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}`, 'GET');
+    const searchQuery = contextLabel === 'Data' ? '' : contextLabel;
+    const queryParam = searchQuery ? `&query=${encodeURIComponent(searchQuery)}` : '';
+    const limitParam = '&limit=500';
+    const result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}${queryParam}${limitParam}`, 'GET');
 
     if (result.success) {
       portalData = (result.data || []).reverse();
-      console.log(`[Portal] Synced ${portalData.length} records (Reversed for chronology).`);
+      console.log(`[Portal] Synced ${portalData.length} records for "${contextLabel}"`);
       
-      // Initially show first 5 most recent if we aren't in a specific filter context
-      if (contextLabel === 'Data') {
+      if (portalData.length === 0) {
+        console.warn(`[Portal] WARNING: No dispatch records found for query "${contextLabel}"`);
+      }
         renderPortalResults(portalData.slice(0, 5));
         document.getElementById('portal-results-count').textContent = `${portalData.length}`;
         document.getElementById('portal-filter-tag').textContent = 'Live Feed';
-      }
     } else {
       if (result.message === 'Session expired.') {
         alert('CountIf Session Expired. Please reconnect.');
@@ -572,119 +691,88 @@ document.getElementById('btn-portal-refresh').addEventListener('click', () => fe
 
 document.getElementById('btn-countif-connect').addEventListener('click', async () => {
   const btn = document.getElementById('btn-countif-connect');
+  const maxRetries = 3;
+  let attempt = 1;
+  
   btn.disabled = true;
   btn.innerHTML = '<span>Connecting...</span>';
   
   // Reset all steps to fresh
   countifResetDashboard();
   btn.disabled = true;
-  btn.innerHTML = '<span>Connecting...</span>';
-  
+
   const stageOrder = ['init', 'page_loaded', 'tokens_harvested', 'authenticated'];
   
-  // Animate stage 1: Init
-  countifSetStep('init', 'active');
-  countifSetBadge('Connecting...', 'yellow');
-  
-  try {
-    // Simulate brief delay for visual feedback before the actual POST
-    await new Promise(r => setTimeout(r, 400));
-    
-    const data = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/login`, 'POST', {
-      username: 'fvazquez',
-      password: 'Topview12345'
-    });
-    
-    // Animate through the stages the server reported
-    if (data.stages && data.stages.length > 0) {
-      for (let i = 0; i < data.stages.length; i++) {
-        const stage = data.stages[i];
-        const stageIdx = stageOrder.indexOf(stage.stage);
-        
-        // Mark all previous stages as complete
-        for (let j = 0; j < stageIdx; j++) {
-          countifSetStep(stageOrder[j], 'complete');
+  async function attemptConnection() {
+    countifSetBadge(`Connecting (Try ${attempt}/${maxRetries})...`, 'yellow');
+    countifSetStep('init', 'active');
+
+    try {
+      const data = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/login`, 'POST', {
+        username: 'fvazquez',
+        password: 'Topview12345'
+      });
+
+      if (data.stages && data.stages.length > 0) {
+        for (let i = 0; i < data.stages.length; i++) {
+          const stage = data.stages[i];
+          const stageIdx = stageOrder.indexOf(stage.stage);
+          for (let j = 0; j < stageIdx; j++) countifSetStep(stageOrder[j], 'complete');
+          
+          if (stage.stage === 'auth_failed' || stage.stage === 'error') {
+            const lastIdx = Math.min(stageIdx >= 0 ? stageIdx : stageOrder.length - 1, stageOrder.length - 1);
+            countifSetStep(stageOrder[lastIdx], 'error');
+          } else {
+            countifSetStep(stage.stage, 'complete');
+          }
         }
-        
-        // Set the current stage
-        if (stage.stage === 'auth_failed' || stage.stage === 'error') {
-          // Mark current stage as error
-          const lastIdx = Math.min(stageIdx >= 0 ? stageIdx : stageOrder.length - 1, stageOrder.length - 1);
-          countifSetStep(stageOrder[lastIdx], 'error');
-        } else {
-          countifSetStep(stage.stage, i === data.stages.length - 1 ? 'complete' : 'complete');
-        }
-        
-        // Slight delay between stage animations
-        await new Promise(r => setTimeout(r, 300));
       }
+
+      if (data.success) {
+        stageOrder.forEach(s => countifSetStep(s, 'complete'));
+        countifSetBadge('Dispatch Active', 'green');
+        portalSessionCookie = data.result?.sessionCookie;
+        localStorage.setItem('portal_session_cookie', portalSessionCookie);
+
+        document.getElementById('countif-setup').style.display = 'none';
+        document.getElementById('countif-portal').style.display = 'block';
+        fetchDispatchData();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.warn(`[CountIf] Attempt ${attempt} failed:`, err.message);
+      return false;
     }
+  }
+
+  while (attempt <= maxRetries) {
+    const success = await attemptConnection();
+    if (success) return;
     
-    if (data.success) {
-      // All steps complete
-      stageOrder.forEach(s => countifSetStep(s, 'complete'));
-      countifSetBadge('Authenticated', 'green');
-      
-      // Store session
-      portalSessionCookie = data.result?.sessionCookie;
-
-      // WAIT for user to see the success checkmarks for a second before switching to portal
-      await new Promise(r => setTimeout(r, 800));
-
-      // TRANSITION TO PORTAL GRID
-      document.getElementById('countif-setup').style.display = 'none';
-      document.getElementById('countif-portal').style.display = 'block';
-      
-      // Auto-fetch data
-      fetchDispatchData();
-      
+    if (attempt < maxRetries) {
+      countifSetBadge(`Retrying (${attempt}/${maxRetries})...`, 'yellow');
+      // Wait 1.5s before retry to give server a breath
+      await new Promise(r => setTimeout(r, 1500));
+      attempt++;
     } else {
-      // Show result error card
+      // Final Failure
+      countifSetStep('init', 'error');
+      countifSetBadge('Offline', 'red');
+      
       const resultEl = document.getElementById('countif-result');
-      const resultIcon = document.getElementById('countif-result-icon');
-      const resultTitle = document.getElementById('countif-result-title');
-      const resultMsg = document.getElementById('countif-result-msg');
-      
       resultEl.style.display = 'block';
-      countifSetBadge('Failed', 'red');
-      
       resultEl.style.background = 'rgba(231, 76, 60, 0.1)';
       resultEl.style.border = '1px solid rgba(231, 76, 60, 0.3)';
-      resultIcon.textContent = '✗';
-      resultIcon.style.color = '#e74c3c';
-      resultTitle.textContent = 'Authentication Failed';
-      resultTitle.style.color = '#e74c3c';
-      resultMsg.textContent = data.result?.message || 'Could not authenticate.';
+      document.getElementById('countif-result-icon').textContent = '⚠';
+      document.getElementById('countif-result-icon').style.color = '#e74c3c';
+      document.getElementById('countif-result-title').textContent = 'Connection Error';
+      document.getElementById('countif-result-msg').textContent = `Backend proxy unreachable after ${maxRetries} attempts.`;
       
-      btn.innerHTML = `
-        <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-navigation"/></svg>
-        <span>Retry Connection</span>
-        <div class="gloss-sheen"></div>
-      `;
+      btn.innerHTML = `<span>Retry Connection</span>`;
       btn.disabled = false;
+      break;
     }
-    
-  } catch (err) {
-    // Network error — proxy is down or unreachable
-    countifSetStep('init', 'error');
-    countifSetBadge('Offline', 'red');
-    
-    const resultEl = document.getElementById('countif-result');
-    resultEl.style.display = 'block';
-    resultEl.style.background = 'rgba(231, 76, 60, 0.1)';
-    resultEl.style.border = '1px solid rgba(231, 76, 60, 0.3)';
-    document.getElementById('countif-result-icon').textContent = '⚠';
-    document.getElementById('countif-result-icon').style.color = '#e74c3c';
-    document.getElementById('countif-result-title').textContent = 'Connection Error';
-    document.getElementById('countif-result-title').style.color = '#e74c3c';
-    document.getElementById('countif-result-msg').textContent = `Backend proxy unreachable: ${err.message}`;
-    
-    btn.innerHTML = `
-      <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-navigation"/></svg>
-      <span>Retry Connection</span>
-      <div class="gloss-sheen"></div>
-    `;
-    btn.disabled = false;
   }
 });
 
@@ -750,13 +838,23 @@ document.getElementById('btn-run-tracker').addEventListener('click', async () =>
 
      if (busId) {
        // --- BUS TRACKING BRANCH ---
-       const busGps = await window.SamsaraEngine.fetchBusLocation(busId, apiKey);
+       const busGps = await SamsaraEngine.fetchBusLocation(busId, apiKey);
+       
+       // ENRICHMENT: Link with CountIf data
+       let enriched = DispatchEngine.getEnrichedStatus(busGps, busId, portalData);
+       
+       // DEEP SEARCH FALLBACK: If unknown, try a targeted search for this specific bus
+       if (enriched.operator === 'Unknown Driver' && portalSessionCookie) {
+         statusBadge.innerHTML = `<div class="status-dot" style="background:#f1c40f;"></div><span>Deep Searching Dispatch...</span>`;
+         await fetchDispatchData(busId); // This updates portalData with results for this bus
+         enriched = DispatchEngine.getEnrichedStatus(busGps, busId, portalData);
+       }
        
        statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
        statusBadge.style.color = '#2ecc71';
-       statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Connected</span>';
+       statusBadge.innerHTML = `<div class="status-dot" style="background:#2ecc71;"></div><span>Connected: ${enriched.operator}</span>`;
        
-       const context = window.SamsaraEngine.resolveRouteContext(busGps, window.SamsaraEngine.CONFIG.STOPS);
+       const context = SamsaraEngine.resolveRouteContext(enriched, SamsaraEngine.CONFIG.STOPS);
        document.getElementById('tracker-last-stop').parentElement.querySelector('.stat-label').textContent = 'LAST STOP';
        document.getElementById('tracker-next-stop').parentElement.querySelector('.stat-label').textContent = 'UPCOMING';
        document.getElementById('tracker-last-stop').textContent = context.lastVisited ? context.lastVisited.name : 'Unknown';
@@ -808,10 +906,10 @@ document.getElementById('btn-run-tracker').addEventListener('click', async () =>
        
      } else {
        // --- STOP RADIUS BRANCH ---
-       const stopObj = window.SamsaraEngine.CONFIG.STOPS.find(s => s.id === stopId);
+       const stopObj = SamsaraEngine.CONFIG.STOPS.find(s => s.id === stopId);
        if (!stopObj) throw new Error("Invalid Stop #");
 
-       const closestBuses = await window.SamsaraEngine.findBusesNearStop(stopObj.lat, stopObj.lng, apiKey, 5);
+       const closestBuses = await SamsaraEngine.findBusesNearStop(stopObj.lat, stopObj.lng, apiKey, 5);
        
        statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
        statusBadge.style.color = '#2ecc71';
@@ -876,82 +974,7 @@ document.getElementById('btn-run-tracker').addEventListener('click', async () =>
   }
 });
 
-document.getElementById('btn-show-all-buses').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-show-all-buses');
-  const orgText = btn.innerHTML;
-  const apiKey = DEFAULTS.SAMSARA_API;
-  
-  if (!apiKey) { alert('Samsara API configuration missing.'); return; }
-  const statusBadge = document.getElementById('tracker-api-status');
-  
-  btn.innerHTML = '<span>Scanning Fleet...</span>';
-  statusBadge.style.background = 'rgba(241, 196, 15, 0.2)';
-  statusBadge.style.color = '#f1c40f';
-  statusBadge.innerHTML = '<div class="status-dot" style="background:#f1c40f;"></div><span>Connecting...</span>';
-  
-  trackerMarkers.forEach(m => trackerMap.removeLayer(m));
-  trackerMarkers = [];
-  
-  try {
-     document.getElementById('tracker-results-container').style.display = 'block';
-     
-     // Pull all buses globally using large limit fallback
-     const closestBuses = await window.SamsaraEngine.findBusesNearStop(0, 0, apiKey, 500);
-     
-     statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
-     statusBadge.style.color = '#2ecc71';
-     statusBadge.innerHTML = `<div class="status-dot" style="background:#2ecc71;"></div><span>Fleet Scan Active</span>`;
-     
-     document.getElementById('tracker-last-stop').parentElement.querySelector('.stat-label').textContent = 'TOTAL SCANNED';
-     document.getElementById('tracker-next-stop').parentElement.querySelector('.stat-label').textContent = 'ACTIVE BUSES';
-     document.getElementById('tracker-last-stop').textContent = closestBuses.length;
-     document.getElementById('tracker-next-stop').textContent = "Map Updated";
-     
-     const timeEl = document.getElementById('tracker-active-time');
-     timeEl.textContent = `Live`;
-     timeEl.style.color = '#2ecc71';
-     document.getElementById('tracker-street-addr').textContent = `Showing all ${closestBuses.length} active buses`;
-     
-     let bounds = [];
-     closestBuses.forEach(bus => {
-       const pos = [bus.latitude, bus.longitude];
-       bounds.push(pos);
-       const customIcon = L.divIcon({
-          html: `
-            <div class="bus-marker-wrapper">
-              <div class="bus-number-label">${bus.name}</div>
-              <div class="bus-beacon">
-                <div class="bus-dot-core"></div>
-                <div class="bus-pulse-ring"></div>
-              </div>
-            </div>
-          `,
-          className: 'bus-custom-marker',
-          iconSize: [40, 40],
-          iconAnchor: [20, 36] 
-       });
-       const marker = L.marker(pos, { icon: customIcon }).addTo(trackerMap);
-       trackerMarkers.push(marker);
-     });
-     
-     // Set viewport to center rigidly on Stop 1 at 14 zoom level
-     trackerMap.setView([40.759433036950966, -73.98454271585518], 14, { animate: true });
-     
-     setTimeout(() => trackerMap.invalidateSize(), 100);
-     
-     btn.innerHTML = `
-       <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-bus"/></svg>
-       <span>All Buses Displayed</span>
-     `;
-     setTimeout(() => btn.innerHTML = orgText, 2500);
-     
-  } catch(e) {
-     statusBadge.style.background = 'rgba(231, 76, 60, 0.2)';
-     statusBadge.style.color = '#e74c3c';
-     statusBadge.innerHTML = `<div class="status-dot" style="background:#e74c3c;"></div><span>${e.message}</span>`;
-     btn.innerHTML = orgText;
-  }
-});
+document.getElementById('btn-show-all-buses').addEventListener('click', runFleetScan);
 
 document.getElementById('btn-menu-logout').addEventListener('click', () => {
   State.currentUser = null;
@@ -1754,4 +1777,12 @@ window.addEventListener('keydown', e => {
 console.log("Topview Logger V1.3.0 initializing...");
 initTimePicker();
 updateStorageCount();
+
+// AUTO-SYNC: If session exists, sync in background immediately
+if (portalSessionCookie) {
+  console.log("[Init] Found active CountIf session, syncing...");
+  countifSetBadge('Synced', 'green');
+  fetchDispatchData(); 
+}
+
 console.log("Topview Logger V1.3.0 operational.");
