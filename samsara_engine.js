@@ -53,27 +53,18 @@ class SamsaraEngine {
    * @param {string} vehicleId - The specific Samsara ID of the bus
    * @param {string} accessToken - The Samsara API Token
    * @returns {Promise<{latitude: number, longitude: number, heading: number, speed: number}>}
-   */
   static async fetchBusLocation(vehicleId, accessToken) {
-    // Stage 1: Resolve name to ID
-    const timestamp = Date.now();
-    let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
-    // Use bridge ONLY on localhost web browser, NOT on native IPA
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const isWeb = window.location.protocol === 'http:' || window.location.protocol === 'https:';
-    
-    if (isLocalhost && isWeb) {
-      listUrl = 'https://corsproxy.io/?' + encodeURIComponent(listUrl);
-    }
+    const PROXY_URL = 'https://topviewloggerr.onrender.com/api/samsara/proxy';
+    const getTunnelUrl = (url) => `${PROXY_URL}?url=${encodeURIComponent(url)}&key=${encodeURIComponent(accessToken)}`;
 
     try {
-      const listRes = await fetch(listUrl, {
+      // Stage 1: Resolve name to ID
+      const timestamp = Date.now();
+      let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
+      
+      const listRes = await fetch(getTunnelUrl(listUrl), {
         method: 'GET',
-        headers: { 
-          'Authorization': `Bearer ${accessToken}`, 
-          'Accept': 'application/json',
-          'User-Agent': 'TopviewLogger/10.0'
-        }
+        headers: { 'Accept': 'application/json' }
       });
 
       if (!listRes.ok) {
@@ -109,18 +100,10 @@ class SamsaraEngine {
 
       // Stage 2: Fetch HIGH-PRECISION location for ID
       const cacheBust = `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
-      let locUrl = `https://api.samsara.com/fleet/vehicles/locations?vehicleIds=${vehicleEntry.id}&_cb=${cacheBust}`;
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        locUrl = 'https://corsproxy.io/?' + encodeURIComponent(locUrl);
-      }
-
-      const locRes = await fetch(locUrl, {
+      const locUrl = `https://api.samsara.com/fleet/vehicles/locations?_cb=${cacheBust}&vehicleIds=${vehicleEntry.id}`;
+      const locRes = await fetch(getTunnelUrl(locUrl), {
         method: 'GET',
-        headers: { 
-          'Authorization': `Bearer ${accessToken}`, 
-          'Accept': 'application/json',
-          'User-Agent': 'TopviewLogger/10.0'
-        }
+        headers: { 'Accept': 'application/json' }
       });
 
       if (!locRes.ok) throw new Error(`Latency Error: ${locRes.status}`);
@@ -180,12 +163,6 @@ class SamsaraEngine {
     return (bearing + 360) % 360; 
   }
 
-  /**
-   * Compares the bus telemetry against all known stops.
-   * Returns human-readable nearest stop and the next upcoming stop.
-   * 
-   * @param {Object} busGps - { latitude, longitude, heading }
-   * @param {Array} routeStops - Array of objects with at least: { name, lat, lng }
   /**
    * Compares the bus telemetry against known stops using Orbital Route Logic.
    * Segments stops into Downtown (1-14) and Uptown (15-23) loops.
@@ -255,26 +232,17 @@ class SamsaraEngine {
    */
   static async findBusesNearStop(lat, lng, accessToken, limit = 3) {
     const timestamp = Date.now();
-    let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
-    let locUrl = `https://api.samsara.com/fleet/vehicles/locations?_cb=${timestamp}`;
+    const listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
+    const locUrl = `https://api.samsara.com/fleet/vehicles/locations?_cb=${timestamp}`;
     
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const isWeb = window.location.protocol === 'http:' || window.location.protocol === 'https:';
-
-    if (isLocalhost && isWeb) {
-      listUrl = 'https://corsproxy.io/?' + encodeURIComponent(listUrl);
-      locUrl = 'https://corsproxy.io/?' + encodeURIComponent(locUrl);
-    }
+    const PROXY_URL = 'https://topviewloggerr.onrender.com/api/samsara/proxy';
+    const getTunnelUrl = (url) => `${PROXY_URL}?url=${encodeURIComponent(url)}&key=${encodeURIComponent(accessToken)}`;
 
     try {
       // 1. Fetch Fleet Roster to get Names mapping
-      const listRes = await fetch(listUrl, {
+      const listRes = await fetch(getTunnelUrl(listUrl), {
         method: 'GET',
-        headers: { 
-          'Authorization': `Bearer ${accessToken}`, 
-          'Accept': 'application/json',
-          'User-Agent': 'TopviewLogger/10.0'
-        }
+        headers: { 'Accept': 'application/json' }
       });
       if (!listRes.ok) throw new Error(`Fleet Discovery Error: ${listRes.status}`);
       const listData = await listRes.json();

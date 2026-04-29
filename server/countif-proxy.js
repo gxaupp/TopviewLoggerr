@@ -277,6 +277,36 @@ app.get('/api/countif/dispatch', async (req, res) => {
   }
 });
 
+// ============================================================
+// SAMSARA SECURE TUNNEL (For Native IPA)
+// ============================================================
+
+app.get('/api/samsara/proxy', async (req, res) => {
+  const targetUrl = req.query.url;
+  const apiKey = req.query.key;
+
+  if (!targetUrl || !apiKey) {
+    return res.status(400).json({ success: false, message: 'URL and Key are required.' });
+  }
+
+  try {
+    const samsaraRes = await fetch(targetUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Accept': 'application/json',
+        'User-Agent': 'TopviewLogger/10.0'
+      }
+    });
+
+    const data = await samsaraRes.json();
+    return res.status(samsaraRes.status).json(data);
+  } catch (err) {
+    console.error('[SamsaraTunnel] Error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ── Health Check ──
 app.get('/api/health', (req, res) => {
   res.json({ status: 'online', service: 'countif-proxy', version: '10.0.0' });
