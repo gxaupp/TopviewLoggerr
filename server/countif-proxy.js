@@ -290,14 +290,19 @@ app.get('/api/samsara/proxy', async (req, res) => {
   }
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
     const samsaraRes = await fetch(targetUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Accept': 'application/json',
         'User-Agent': 'TopviewLogger/10.0'
-      }
+      },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     const contentType = samsaraRes.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {

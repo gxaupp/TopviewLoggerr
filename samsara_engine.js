@@ -129,7 +129,9 @@ class SamsaraEngine {
       };
     } catch (e) {
       console.error('[SamsaraEngine] Connection failed:', e);
-      throw e;
+      // Provide more detail for the UI
+      const detail = e.message || 'Unknown Network Error';
+      throw new Error(`Samsara: ${detail}`);
     }
   }
 
