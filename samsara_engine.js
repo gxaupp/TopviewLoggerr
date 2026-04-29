@@ -63,10 +63,23 @@ class SamsaraEngine {
       const timestamp = Date.now();
       let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
       
-      const listRes = await fetch(getTunnelUrl(listUrl), {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
+      let listRes;
+      try {
+        listRes = await fetch(getTunnelUrl(listUrl), {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        });
+      } catch (tunnelError) {
+        console.warn('[SamsaraEngine] Tunnel blocked, falling back to direct connection.');
+        listRes = await fetch(listUrl, {
+          method: 'GET',
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json',
+            'User-Agent': 'TopviewLogger/10.0'
+          }
+        });
+      }
 
       if (!listRes.ok) {
         const errText = await listRes.text().catch(() => '');
@@ -105,11 +118,23 @@ class SamsaraEngine {
 
       // Stage 2: Fetch HIGH-PRECISION location for ID
       const cacheBust = `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
-      const locUrl = `https://api.samsara.com/fleet/vehicles/locations?_cb=${cacheBust}&vehicleIds=${vehicleEntry.id}`;
-      const locRes = await fetch(getTunnelUrl(locUrl), {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
+      let locRes;
+      try {
+        locRes = await fetch(getTunnelUrl(locUrl), {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        });
+      } catch (tunnelError) {
+        console.warn('[SamsaraEngine] Location Tunnel blocked, falling back to direct.');
+        locRes = await fetch(locUrl, {
+          method: 'GET',
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json',
+            'User-Agent': 'TopviewLogger/10.0'
+          }
+        });
+      }
 
       if (!locRes.ok) throw new Error(`Latency Error: ${locRes.status}`);
 
