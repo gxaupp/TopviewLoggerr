@@ -46,11 +46,31 @@
     .stop-tip { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #000; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; opacity: 0; pointer-events: none; transition: all 0.2s ease; white-space: nowrap; margin-bottom: 8px; border: 1px solid #2ecc71; box-shadow: 0 4px 15px rgba(0,0,0,0.8); z-index: 200; }
     .stop-marker-wrapper:hover .stop-tip { opacity: 1; transform: translateX(-50%) translateY(-5px); }
   </style>
-  <script type="module" crossorigin src="/assets/main-Cd9saSld.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/main-CWBISfe2.css">
+  <script type="module" crossorigin src="/assets/index-DU_IdM7K.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BZc0mSRI.css">
 </head>
-<body>
-<div id="app">
+<body style="background-color: #0a0a0a; margin: 0; padding: 0;">
+  <script>
+    // EMERGENCY RECOVERY: Forcibly clear any stale service workers/caches that break the UI
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(registrations => {
+        for (let registration of registrations) {
+          registration.unregister().then(() => {
+            console.log("Stale Service Worker Cleared. Refreshing for clean state...");
+            window.location.reload(true);
+          });
+        }
+      });
+    }
+    // Clear caches
+    if ('caches' in window) {
+      caches.keys().then(names => {
+        for (let name of names) caches.delete(name);
+      });
+    }
+    console.log("V10.0.0 Noir Recovery Active.");
+  </script>
+  <div id="app">
 
   <!-- ============ LOGIN VIEW ============ -->
   <main id="login-view" class="view active">
@@ -58,14 +78,14 @@
       <header class="view-header">
         <h1 class="glow-text">Topview Logger</h1>
         <p class="subtitle">Enter name below</p>
-        <div style="background:#2ecc71; color:black; font-size:10px; font-weight:900; padding:2px 8px; border-radius:4px; margin-top:5px; display:inline-block; letter-spacing:1px; box-shadow:0 0 10px rgba(46,204,113,0.5);">V1.3.0 CLOUD</div>
+        <div style="background:#2ecc71; color:black; font-size:10px; font-weight:900; padding:2px 8px; border-radius:4px; margin-top:5px; display:inline-block; letter-spacing:1px; box-shadow:0 0 10px rgba(46,204,113,0.5);">V10.0.0 CLOUD</div>
       </header>
       <div class="login-form">
         <div class="input-group" style="margin-bottom:2rem;">
           <label for="username">Name</label>
           <input type="text" id="username" placeholder="Enter name..." autocomplete="off" />
         </div>
-        <button id="btn-login-confirm" class="btn-primary">
+        <button id="btn-login-confirm" class="btn-primary" onclick="doLogin()">
           <span>Enter</span>
           <div class="gloss-sheen"></div>
         </button>
@@ -96,7 +116,7 @@
           <span>Samsara Map</span>
           <div class="gloss-sheen"></div>
         </button>
-        <button id="btn-experiment" class="btn-primary" style="gap:.75rem;">
+        <button id="btn-experiment" class="btn-primary" style="display:none; gap:.75rem;">
           <svg class="icon-sm"><use href="#icon-folder"/></svg>
           <span>Dispatch Report</span>
           <div class="gloss-sheen"></div>
@@ -106,7 +126,7 @@
           <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://docs.google.com/forms/d/e/1FAIpQLSdlcMExtKCdKrDjad4B4Rq1y4phVHG5nSJhY_seBxKgbQBSYw/viewform">Stopwatch</button>
           <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://docs.google.com/forms/d/e/1FAIpQLSfc97vaKGcC6Ijdjer5fyQ2M3qN93scHiBGDRWtD_gYhU1ROw/viewform">Full Loop</button>
           <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://docs.google.com/forms/d/e/1FAIpQLScBb6QmvpC1LcDZnxf8IKMP388XwmDMJCF811M1kx1TOkmcwA/viewform">Night Tour</button>
-          <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://www.countif.net">Dispatch</button>
+          <button class="violation-btn-sm hud-shortcut" style="display:none; flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://www.countif.net">Dispatch</button>
         </div>
         <button id="btn-menu-logout" class="btn-tertiary"><span>Sign Out</span></button>
       </div>
@@ -261,12 +281,23 @@
         <button class="icon-btn-sm btn-back" data-target="menu"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
         <h2>Live Bus Tracker</h2>
       </header>
-      <div class="liquid-glass-container" style="margin-bottom: 1.5rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
-          <h3 class="section-title" style="margin: 0;">Configuration</h3>
-          <div id="tracker-api-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4);">
-            <div class="status-dot"></div>
-            <span>Waiting...</span>
+      <div class="liquid-glass-container" style="padding-top: 1rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem; padding: 0 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h3 class="section-title" style="margin: 0;">Configuration</h3>
+            <button id="btn-mini-dispatch" class="violation-btn-sm" style="width: 32px; height: 24px; padding: 0; border-radius: 6px; background: rgba(46, 204, 113, 0.1); border: 1px solid rgba(46, 204, 113, 0.2); font-size: 0.65rem; font-weight: 800; color: var(--green); display: flex; align-items: center; justify-content: center;" title="Open Dispatch Report">
+              DR
+            </button>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+            <div id="tracker-api-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4);">
+              <div class="status-dot"></div>
+              <span>Waiting...</span>
+            </div>
+            <div id="tracker-dispatch-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); font-size: 0.65rem; padding: 2px 8px;">
+              <div class="status-dot" style="width: 6px; height: 6px;"></div>
+              <span>Dispatch Idle</span>
+            </div>
           </div>
         </div>
         <div class="input-group">
@@ -702,13 +733,8 @@
 </div>
 
 <script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('Service Worker registered:', reg.scope))
-      .catch(err => console.log('Service Worker orientation failed:', err));
-  });
-}
+<!-- Service worker registration removed to prevent cache loops -->
 </script>
+<!-- Removed duplicate script tags handled by ESM imports in app.js -->
 </body>
 </html>
