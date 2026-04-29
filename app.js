@@ -9,21 +9,9 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
 import DispatchEngine from './dispatch_engine.js';
 import SamsaraEngine from './samsara_engine.js';
+import './styles.css';
 
-console.log("App.js loading (ESM Mode)...");
-
-// FORCIBLY UNREGISTER ANY STALE SERVICE WORKERS to fix "broken UI" issues
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(function(registrations) {
-    if (registrations.length > 0) {
-      for (let registration of registrations) {
-        registration.unregister();
-      }
-      console.log("Stale Service Worker Unregistered. Reloading...");
-      setTimeout(() => window.location.reload(true), 500);
-    }
-  });
-}
+console.log("App.js loading (ESM Mode + CSS)...");
 
 // ===== STATE =====
 const State = {

@@ -342,4 +342,7 @@ class SamsaraEngine {
     }
 })();
 */
-window.SamsaraEngine = SamsaraEngine;
+if (typeof window !== 'undefined') {
+  window.SamsaraEngine = SamsaraEngine;
+}
+export default SamsaraEngine;

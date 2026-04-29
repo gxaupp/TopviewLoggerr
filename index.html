@@ -10,7 +10,6 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Topview" />
   <meta name="theme-color" content="#0a0a0a" />
-  <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <svg style="display:none">
@@ -711,7 +710,15 @@
 </div>
 
 <script>
-<!-- Service worker registration removed to prevent cache loops -->
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('Service Worker registered:', reg.scope))
+      .catch(err => console.log('Service Worker orientation failed:', err));
+  });
+}
+</script>
+<!-- Removed duplicate script tags handled by ESM imports in app.js -->
 <script type="module" src="app.js?v=v1_3_features"></script>
 </body>
 </html>

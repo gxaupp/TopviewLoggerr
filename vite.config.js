@@ -1,19 +1,12 @@
 import { defineConfig } from 'vite';
-import { resolve } from 'path';
 
 export default defineConfig({
-  root: '.',
-  build: {
-    outDir: 'dist',
-    rollupOptions: {
-      input: {
-        main: resolve(__dirname, 'index.html')
-      }
+  server: {
+    fs: {
+      strict: false
     }
   },
-  server: {
-    port: 5175,
-    strictPort: true
-  },
-  publicDir: 'public'
+  optimizeDeps: {
+    disabled: true
+  }
 });
