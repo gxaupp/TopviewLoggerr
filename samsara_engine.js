@@ -1,10 +1,20 @@
 /**
  * Samsara Telemetry Engine
  * 
- * This module fetches real-time GPS coordinates directly from the Samsara Vehicle Stats API.
+ * This module fetches real-time GPS coordinates directly from the Samsara Vehicle Stats API
+ * and geometrically resolves them against a static list of physical stops to determine
+ * the closest LAST VISITED stop vs the exact NEXT UPCOMING stop without relying 
+ * on complex route polygons.
  */
 
+/**
+ * SAMSARA CONFIGURATION
+ * ------------------------------------------------------------
+ * 1. Insert your API Key below.
+ * 2. Update the latitude and longitude for each of the 23 stops.
+ */
 const SAMSARA_CONFIG = {
+  API_KEY: 'PASTE_YOUR_SAMSARA_API_KEY_HERE',
   STOPS: [
     { "id": 1, "name": "Stop 01", "lat": 40.759433036950966, "lng": -73.98454271585518 },
     { "id": 2, "name": "Stop 02", "lat": 40.7551337, "lng": -73.9878992 },
@@ -33,126 +43,306 @@ const SAMSARA_CONFIG = {
 };
 
 class SamsaraEngine {
-  static get CONFIG() { return SAMSARA_CONFIG; }
-
+  
+  static get CONFIG() {
+    return SAMSARA_CONFIG;
+  }
+  
+  /**
+   * Fetches the raw GPS state of a specific vehicle from the Samsara platform.
+   * @param {string} vehicleId - The specific Samsara ID of the bus
+   * @param {string} accessToken - The Samsara API Token
+   * @returns {Promise<{latitude: number, longitude: number, heading: number, speed: number}>}
+   */
   static async fetchBusLocation(vehicleId, accessToken) {
+    // Stage 1: Resolve name to ID
+    const timestamp = Date.now();
+    let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      listUrl = 'https://corsproxy.io/?' + encodeURIComponent(listUrl);
+    }
+
     try {
-      const timestamp = Date.now();
-      const listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
-      
       const listRes = await fetch(listUrl, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
       });
 
-      if (!listRes.ok) throw new Error(`Discovery Error: ${listRes.status}`);
+      if (!listRes.ok) throw new Error(listRes.status === 401 ? 'Invalid API Token' : `Discovery Error: ${listRes.status}`);
+
       const listData = await listRes.json();
       const vehicles = listData.data || [];
+      console.log(`[Samsara] Fleet Discovery: Found ${vehicles.length} assets.`);
+
       const searchId = vehicleId.trim().toLowerCase();
       
-      const match = vehicles.find(v => 
-        (v.name || '').trim().toLowerCase() === searchId || 
-        (v.id || '').trim().toLowerCase() === searchId
-      );
+      // Filter for all potential matches (Name, ID, or VIN)
+      const possibleVehicles = vehicles.filter(v => {
+        const name = (v.name || '').trim().toLowerCase();
+        const id = (v.id || '').trim().toLowerCase();
+        const vin = (v.vin || '').trim().toLowerCase();
+        return name === searchId || id === searchId || vin === searchId;
+      });
 
-      if (!match) throw new Error('Bus Not Found');
+      if (possibleVehicles.length === 0) {
+        console.warn(`[Samsara] No match for "${searchId}" in registry.`);
+        throw new Error('Invalid Bus ID');
+      }
 
-      const locUrl = `https://api.samsara.com/fleet/vehicles/locations?vehicleIds=${match.id}&_cb=${timestamp}`;
+      // SELECT THE MOST RECENT: Sort by updatedAtTime to ensure we get the live asset, not a decommissioned clone
+      possibleVehicles.sort((a, b) => new Date(b.updatedAtTime || 0) - new Date(a.updatedAtTime || 0));
+      const vehicleEntry = possibleVehicles[0];
+      
+      console.log(`[Samsara] Resolved "${searchId}" to ${vehicleEntry.name} (ID: ${vehicleEntry.id}) - Updated: ${vehicleEntry.updatedAtTime}`);
+
+      // Stage 2: Fetch HIGH-PRECISION location for ID
+      const cacheBust = `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+      let locUrl = `https://api.samsara.com/fleet/vehicles/locations?vehicleIds=${vehicleEntry.id}&_cb=${cacheBust}`;
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        locUrl = 'https://corsproxy.io/?' + encodeURIComponent(locUrl);
+      }
+
       const locRes = await fetch(locUrl, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
       });
 
-      if (!locRes.ok) throw new Error(`Location Error: ${locRes.status}`);
+      if (!locRes.ok) throw new Error(`Latency Error: ${locRes.status}`);
+
       const locData = await locRes.json();
-      const loc = (locData.data || [])[0];
+      const vehicle = (locData.data || [])[0];
+      
+      if (!vehicle || !vehicle.location) throw new Error('No Satellite Contact');
 
-      if (!loc || !loc.location) throw new Error('No GPS Data');
-
+      const locBlock = vehicle.location;
+      
       return {
-        latitude: loc.location.latitude,
-        longitude: loc.location.longitude,
-        heading: loc.location.heading || 0,
-        speed: loc.location.speed || 0,
-        time: loc.location.time,
-        address: loc.location.reverseGeo ? loc.location.reverseGeo.formattedLocation : "Unknown"
+        latitude: locBlock.latitude,
+        longitude: locBlock.longitude,
+        heading: locBlock.heading || 0,
+        speed: (locBlock.speed !== undefined) ? locBlock.speed : 0,
+        time: locBlock.time,
+        address: locBlock.reverseGeo ? locBlock.reverseGeo.formattedLocation : "Unknown Street"
       };
     } catch (e) {
+      console.error('[SamsaraEngine] Connection failed:', e);
       throw e;
     }
   }
 
+  /**
+   * Calculates the Haversine great-circle distance between two earth coordinates.
+   */
   static getDistanceMeters(lat1, lon1, lat2, lon2) {
-    const R = 6371e3;
+    const R = 6371e3; // Earth radius in meters
     const φ1 = lat1 * Math.PI/180;
     const φ2 = lat2 * Math.PI/180;
     const Δφ = (lat2-lat1) * Math.PI/180;
     const Δλ = (lon2-lon1) * Math.PI/180;
-    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
-    return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c; 
   }
 
+  /**
+   * Calculates the Vector Bearing (Angle) from A to B.
+   */
   static getBearingDegrees(startLat, startLng, destLat, destLng) {
-    const y = Math.sin((destLng - startLng) * Math.PI / 180) * Math.cos(destLat * Math.PI / 180);
-    const x = Math.cos(startLat * Math.PI / 180) * Math.sin(destLat * Math.PI / 180) -
-              Math.sin(startLat * Math.PI / 180) * Math.cos(destLat * Math.PI / 180) * Math.cos((destLng - startLng) * Math.PI / 180);
-    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    const startLatRad = startLat * Math.PI / 180;
+    const startLngRad = startLng * Math.PI / 180;
+    const destLatRad = destLat * Math.PI / 180;
+    const destLngRad = destLng * Math.PI / 180;
+
+    const y = Math.sin(destLngRad - startLngRad) * Math.cos(destLatRad);
+    const x = Math.cos(startLatRad) * Math.sin(destLatRad) -
+              Math.sin(startLatRad) * Math.cos(destLatRad) * Math.cos(destLngRad - startLngRad);
+              
+    let bearing = Math.atan2(y, x) * 180 / Math.PI;
+    return (bearing + 360) % 360; 
   }
 
+  /**
+   * Compares the bus telemetry against all known stops.
+   * Returns human-readable nearest stop and the next upcoming stop.
+   * 
+   * @param {Object} busGps - { latitude, longitude, heading }
+   * @param {Array} routeStops - Array of objects with at least: { name, lat, lng }
+  /**
+   * Compares the bus telemetry against known stops using Orbital Route Logic.
+   * Segments stops into Downtown (1-14) and Uptown (15-23) loops.
+   * 
+   * @param {Object} busGps - { latitude, longitude, heading }
+   * @param {Array} routeStops - Array of objects with at least: { id, name, lat, lng }
+   */
   static resolveRouteContext(busGps, routeStops) {
-    const stops = routeStops.map(s => ({
-      ...s,
-      distanceMeters: this.getDistanceMeters(busGps.latitude, busGps.longitude, s.lat, s.lng)
-    })).sort((a, b) => a.distanceMeters - b.distanceMeters);
+    // 1. First, find the ABSOLUTE closest stop to determine the current Route Cluster
+    const allStopsWithDist = routeStops.map(stop => ({
+      ...stop,
+      distanceMeters: this.getDistanceMeters(busGps.latitude, busGps.longitude, stop.lat, stop.lng)
+    }));
+    
+    allStopsWithDist.sort((a, b) => a.distanceMeters - b.distanceMeters);
+    const absoluteClosest = allStopsWithDist[0];
+    
+    // 2. Identify active cluster (Downtown 1-14 vs Uptown 15-23)
+    // Using ID ranges as the source of truth for the loop
+    const isDowntown = absoluteClosest.id <= 14;
+    const activeCluster = isDowntown 
+      ? allStopsWithDist.filter(s => s.id <= 14)
+      : allStopsWithDist.filter(s => s.id > 14);
 
-    const absoluteClosest = stops[0];
-    const cluster = absoluteClosest.id <= 14 ? stops.filter(s => s.id <= 14) : stops.filter(s => s.id > 14);
+    console.log(`[RouteEngine] Detected Loop: ${isDowntown ? 'DOWNTOWN' : 'UPTOWN'} (Locked to ${activeCluster.length} nodes)`);
 
-    const analyzed = cluster.map(s => {
-      const bearing = this.getBearingDegrees(busGps.latitude, busGps.longitude, s.lat, s.lng);
-      let diff = Math.abs(busGps.heading - bearing);
-      if (diff > 180) diff = 360 - diff;
-      return { ...s, isBehind: diff > 90 };
-    }).sort((a, b) => a.distanceMeters - b.distanceMeters);
+    // 3. Resolve Last/Upcoming based ONLY on the active cluster
+    let analyzedStops = activeCluster.map(stop => {
+      const bearingToStop = this.getBearingDegrees(busGps.latitude, busGps.longitude, stop.lat, stop.lng);
+      
+      // Calculate angular drift
+      let angleDiff = Math.abs(busGps.heading - bearingToStop);
+      if (angleDiff > 180) angleDiff = 360 - angleDiff;
+      
+      // Geometric "Behind" check
+      const isBehind = angleDiff > 90; 
+
+      return { 
+        ...stop, 
+        bearingToStop: bearingToStop,
+        isBehind: isBehind 
+      };
+    });
+
+    // 4. Extract context
+    // Sort within cluster by distance to ensure we find the closest one ahead/behind
+    analyzedStops.sort((a, b) => a.distanceMeters - b.distanceMeters);
+    
+    const lastVisited = analyzedStops.find(s => s.isBehind) || null;
+    const upcoming = analyzedStops.find(s => !s.isBehind) || null;
 
     return {
+      route: isDowntown ? 'Downtown' : 'Uptown',
       absoluteClosest,
-      lastVisited: analyzed.find(s => s.isBehind) || null,
-      upcoming: analyzed.find(s => !s.isBehind) || null
+      lastVisited,
+      upcoming,
+      rawAnalysis: analyzedStops 
     };
   }
 
+  /**
+   * Fetches the closest active buses to a given coordinate.
+   * @param {number} lat - Latitude of the stop
+   * @param {number} lng - Longitude of the stop
+   * @param {string} accessToken - Samsara API Token
+   * @param {number} limit - Number of closest buses to return (default: 2)
+   */
   static async findBusesNearStop(lat, lng, accessToken, limit = 3) {
     const timestamp = Date.now();
-    const listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
-    const locUrl = `https://api.samsara.com/fleet/vehicles/locations?_cb=${timestamp}`;
+    let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
+    let locUrl = `https://api.samsara.com/fleet/vehicles/locations?_cb=${timestamp}`;
+    
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      listUrl = 'https://corsproxy.io/?' + encodeURIComponent(listUrl);
+      locUrl = 'https://corsproxy.io/?' + encodeURIComponent(locUrl);
+    }
 
     try {
+      // 1. Fetch Fleet Roster to get Names mapping
       const listRes = await fetch(listUrl, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
       });
+      if (!listRes.ok) throw new Error('Fleet Discovery Error');
       const listData = await listRes.json();
+      const vehicles = listData.data || [];
+      
       const nameMap = {};
-      (listData.data || []).forEach(v => { nameMap[v.id] = v.name; });
+      vehicles.forEach(v => {
+        nameMap[v.id] = v.name || 'Unknown Bus';
+      });
 
+      // 2. Fetch all locations
       const locRes = await fetch(locUrl, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
       });
-      const activeLocations = (await locRes.json()).data || [];
+      if (!locRes.ok) throw new Error('Location API Error');
+      const locData = await locRes.json();
+      const activeLocations = locData.data || [];
 
-      return activeLocations.map(v => ({
-        id: v.id,
-        name: nameMap[v.id] || v.name || v.id,
-        latitude: v.location.latitude,
-        longitude: v.location.longitude,
-        heading: v.location.heading || 0,
-        distanceToStop: this.getDistanceMeters(lat, lng, v.location.latitude, v.location.longitude)
-      })).filter(v => v.latitude).sort((a, b) => a.distanceToStop - b.distanceToStop).slice(0, limit);
-    } catch (e) { throw e; }
+      // 3. Calculate distance to Stop for each vehicle
+      let busesWithDistance = [];
+      activeLocations.forEach(v => {
+        if (!v.location) return;
+        const busName = nameMap[v.id] || v.name || v.id;
+        const distance = this.getDistanceMeters(lat, lng, v.location.latitude, v.location.longitude);
+        
+        // Filter out stale coordinates (older than 10 minutes)
+        const diffMins = Math.floor(Math.abs(Date.now() - new Date(v.location.time).getTime()) / 60000);
+        if (diffMins > 10) return; // Skip severely stale buses
+
+        busesWithDistance.push({
+          id: v.id,
+          name: busName,
+          latitude: v.location.latitude,
+          longitude: v.location.longitude,
+          heading: v.location.heading || 0,
+          speed: v.location.speed || 0,
+          time: v.location.time,
+          address: v.location.reverseGeo ? v.location.reverseGeo.formattedLocation : "Unknown Location",
+          distanceToStop: distance
+        });
+      });
+
+      busesWithDistance.sort((a, b) => a.distanceToStop - b.distanceToStop);
+      
+      return busesWithDistance.slice(0, limit);
+      
+    } catch(e) {
+      console.error('[SamsaraEngine] Error in findBusesNearStop:', e);
+      throw e;
+    }
   }
+
 }
 
-if (typeof window !== 'undefined') { window.SamsaraEngine = SamsaraEngine; }
+// ==========================================
+// TEST MOCK DATA - Usage Example
+// ==========================================
+/*
+(async () => {
+    try {
+        // Assume you have this list matching your Topview Logger stops
+        const myStops = [
+            { name: "Times Square", lat: 40.7580, lng: -73.9855 },
+            { name: "Penn Station", lat: 40.7506, lng: -73.9935 },
+            { name: "Central Park Zoo", lat: 40.7670, lng: -73.9740 }
+        ];
+
+        // 1. Fetch live telemetry for Bus ID 4205
+        // const liveBus = await SamsaraEngine.fetchBusLocation('4205'); 
+
+        // Simulated Response: Bus heading South down 7th Ave from Central Park
+        const mockedLiveBus = {
+            latitude: 40.7630, 
+            longitude: -73.9780,
+            heading: 210, // Driving roughly South-West
+            speed: 15
+        };
+
+        // 2. Run the math engine
+        const context = SamsaraEngine.resolveRouteContext(mockedLiveBus, myStops);
+
+        console.log(`CURRENT TARGET: The bus is driving towards ${context.upcoming.name} (Distance: ${Math.round(context.upcoming.distanceMeters)}m)`);
+        console.log(`PREVIOUS STOP: It already passed ${context.lastVisited.name} (Distance: ${Math.round(context.lastVisited.distanceMeters)}m behind)`);
+
+    } catch(err) {
+        console.error(err);
+    }
+})();
+*/
+if (typeof window !== 'undefined') {
+  window.SamsaraEngine = SamsaraEngine;
+}
 export default SamsaraEngine;
