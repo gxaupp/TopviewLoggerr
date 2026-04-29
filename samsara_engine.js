@@ -65,10 +65,18 @@ class SamsaraEngine {
     try {
       const listRes = await fetch(listUrl, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`, 
+          'Accept': 'application/json',
+          'User-Agent': 'TopviewLogger/10.0'
+        }
       });
 
-      if (!listRes.ok) throw new Error(listRes.status === 401 ? 'Invalid API Token' : `Discovery Error: ${listRes.status}`);
+      if (!listRes.ok) {
+        const errText = await listRes.text().catch(() => '');
+        console.error(`[Samsara] HTTP ${listRes.status} Error:`, errText);
+        throw new Error(listRes.status === 401 ? 'Invalid API Token' : `Samsara Discovery Error: ${listRes.status} (Forbidden)`);
+      }
 
       const listData = await listRes.json();
       const vehicles = listData.data || [];
@@ -104,7 +112,11 @@ class SamsaraEngine {
 
       const locRes = await fetch(locUrl, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`, 
+          'Accept': 'application/json',
+          'User-Agent': 'TopviewLogger/10.0'
+        }
       });
 
       if (!locRes.ok) throw new Error(`Latency Error: ${locRes.status}`);
@@ -251,9 +263,13 @@ class SamsaraEngine {
       // 1. Fetch Fleet Roster to get Names mapping
       const listRes = await fetch(listUrl, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`, 
+          'Accept': 'application/json',
+          'User-Agent': 'TopviewLogger/10.0'
+        }
       });
-      if (!listRes.ok) throw new Error('Fleet Discovery Error');
+      if (!listRes.ok) throw new Error(`Fleet Discovery Error: ${listRes.status}`);
       const listData = await listRes.json();
       const vehicles = listData.data || [];
       
@@ -265,7 +281,11 @@ class SamsaraEngine {
       // 2. Fetch all locations
       const locRes = await fetch(locUrl, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`, 
+          'Accept': 'application/json',
+          'User-Agent': 'TopviewLogger/10.0'
+        }
       });
       if (!locRes.ok) throw new Error('Location API Error');
       const locData = await locRes.json();

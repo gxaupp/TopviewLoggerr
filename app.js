@@ -9,9 +9,8 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
 import DispatchEngine from './dispatch_engine.js';
 import SamsaraEngine from './samsara_engine.js';
-import './styles.css';
 
-console.log("App.js loading (ESM Mode + CSS)...");
+console.log("App.js loading (ESM Mode)...");
 
 // FORCIBLY UNREGISTER ANY STALE SERVICE WORKERS to fix "broken UI" issues
 if ('serviceWorker' in navigator) {
@@ -69,10 +68,39 @@ const timeToMinutes = (s) => {
   if (p[1] === 'AM' && h === 12) h = 0;
   return h * 60 + m;
 };
+
+window.copyToClipboard = function(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) {
+      btn.classList.add('copy-glow-green');
+      setTimeout(() => btn.classList.remove('copy-glow-green'), 1000);
+    }
+  });
+};
 const stripAmPm = (s) => s ? s.replace(/\s*(AM|PM)/gi, '') : '';
 const stripLeadingZero = (s) => s ? s.replace(/\b0(\d:)/g, '$1') : '';
 const formatReportTime = (s) => stripLeadingZero(stripAmPm(s));
+const formatDisplayTime = (date) => {
+  if (!date) return 'No Entry';
+  const d = new Date(date);
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+};
 const daysBetween = (d1, d2) => Math.floor(Math.abs(d2-d1) / (1000*60*60*24));
+
+async function copyToClipboard(text, btnElement) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+  if (btnElement) {
+    btnElement.classList.add('copy-glow-green');
+    setTimeout(() => btnElement.classList.remove('copy-glow-green'), 800);
+  }
+}
 
 // ===== VIEW NAVIGATION =====
 const views = {};
@@ -230,25 +258,32 @@ function updateStorageCount() {
 }
 
 // ===== LOGIN =====
-document.getElementById('btn-login-confirm').addEventListener('click', doLogin);
 function doLogin() {
-  console.log("doLogin called");
+  console.log("[doLogin] Attempting login...");
   const input = document.getElementById('username');
+  if (!input) {
+    console.error("[doLogin] Error: 'username' input not found in DOM!");
+    return;
+  }
   const name = input.value.trim();
   if (!name) { 
-    console.log("No name entered");
+    console.warn("[doLogin] No name entered, highlighting input.");
     input.style.borderColor = 'red'; 
     setTimeout(() => input.style.borderColor = '', 1000); 
     return; 
   }
-  console.log("Logging in as:", name);
+  console.log("[doLogin] Success: Logging in as", name);
   State.currentUser = name;
   localStorage.setItem(KEYS.USER, name);
-  document.getElementById('menu-welcome').textContent = `Hello, ${name}`;
+  
+  const welcomeEl = document.getElementById('menu-welcome');
+  if (welcomeEl) welcomeEl.textContent = `Hello, ${name}`;
+  
   loadAllData();
   showView('menu');
   
-  // AUTO-CONNECT: Background CountIf link even on fresh login
+  console.log("[doLogin] Navigation to menu triggered.");
+  
   console.log("[Login] Triggering background CountIf link...");
   setTimeout(() => {
      const connectBtn = document.getElementById('btn-countif-connect');
@@ -256,9 +291,24 @@ function doLogin() {
   }, 300);
 }
 
+// Ensure Enter key works on the login input specifically
+document.getElementById('username').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    doLogin();
+  }
+});
+
 window.doLogin = doLogin;
 window.showView = showView;
 window.State = State;
+
+// Attach click listener
+const loginBtn = document.getElementById('btn-login-confirm');
+if (loginBtn) {
+  loginBtn.addEventListener('click', doLogin);
+  console.log("[Init] Login button listener attached.");
+}
 
 // Auto-login
 (function checkAutoLogin() {
@@ -407,6 +457,14 @@ document.getElementById('btn-experiment').addEventListener('click', () => {
   countifResetDashboard();
 });
 
+document.getElementById('btn-mini-dispatch').addEventListener('click', () => {
+  showView('countif');
+  // Auto-trigger sync if we have a cookie
+  if (portalSessionCookie) {
+     fetchDispatchData();
+  }
+});
+
 const COUNTIF_PROXY_URL = 'https://topviewloggerr.onrender.com';
 
 /**
@@ -528,8 +586,14 @@ async function fetchDispatchData(contextLabel = 'Data') {
     const result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}${queryParam}${limitParam}`, 'GET');
 
     if (result.success) {
-      portalData = (result.data || []).reverse();
-      console.log(`[Portal] Synced ${portalData.length} records for "${contextLabel}"`);
+      const now = new Date();
+      portalData = (result.data || []).reverse().filter(record => {
+        if (!record.date) return false;
+        const recordDate = new Date(record.date);
+        const diffHrs = (now - recordDate) / (1000 * 60 * 60);
+        return diffHrs <= 24;
+      });
+      console.log(`[Portal] Synced ${portalData.length} records (24h filter) for "${contextLabel}"`);
       
       if (portalData.length === 0) {
         console.warn(`[Portal] WARNING: No dispatch records found for query "${contextLabel}"`);
@@ -597,8 +661,24 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
     if (isBus || isStop) {
       snapshotArea.style.display = 'block';
       if (isBus) {
-        driverRow.style.display = 'block';
-        drVal.textContent = records[0].operator;
+        driverRow.style.display = 'flex';
+        driverRow.style.alignItems = 'center';
+        driverRow.style.justifyContent = 'space-between';
+        
+        const driverName = records[0].operator;
+        const timeStr = formatDisplayTime(records[0].date);
+        drVal.innerHTML = `${driverName} <span style="opacity:0.6; font-weight:400; margin-left:4px;">(${timeStr})</span>`;
+        
+        // Add or update copy button
+        let copyBtn = driverRow.querySelector('.btn-copy-driver');
+        if (!copyBtn) {
+          copyBtn = document.createElement('button');
+          copyBtn.className = 'icon-btn-sm btn-copy-driver';
+          copyBtn.style.cssText = 'margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px; padding: 4px;';
+          copyBtn.innerHTML = '<svg class="icon-xs" style="fill: var(--green);"><use href="#icon-clipboard"/></svg>';
+          driverRow.appendChild(copyBtn);
+        }
+        copyBtn.onclick = () => copyToClipboard(driverName, copyBtn);
       }
       if (isStop) {
         superRow.style.display = 'flex';
@@ -663,7 +743,13 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
           <span style="font-size: 0.85rem; font-weight: 600; opacity: 0.8; color: white;">${timestamp}</span>
         </div>
         ${options.hideStop ? '' : `<div style="font-size: 0.8rem; color: white; margin-bottom: 0.3rem; opacity: 0.9;">${record.stop}</div>`}
-        <div style="font-size: 0.95rem; opacity: 0.8; font-weight: 500;">${record.operator} • ${record.route}</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; opacity: 0.8; font-weight: 500;">
+          <span>${record.operator} • ${record.route}</span>
+          <button class="violation-btn-sm" style="width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(46, 204, 113, 0.1); border: 1px solid rgba(46, 204, 113, 0.2);" 
+                  onclick="copyToClipboard('${record.operator.replace(/'/g, "\\'")}', this)" title="Copy Driver Name">
+            <svg style="width: 14px; height: 14px; fill: var(--green);"><use href="#icon-folder"/></svg>
+          </button>
+        </div>
       </div>
     `;
   }).join('');
@@ -866,7 +952,25 @@ document.getElementById('btn-run-tracker').addEventListener('click', async () =>
        
        statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
        statusBadge.style.color = '#2ecc71';
-       statusBadge.innerHTML = `<div class="status-dot" style="background:#2ecc71;"></div><span>Connected: ${enriched.operator}</span>`;
+       
+       const reportTimeStr = enriched.dispatchTime ? formatDisplayTime(enriched.dispatchTime) : 'No Entry';
+       const timeDisplay = ` (${reportTimeStr})`;
+       
+       statusBadge.innerHTML = `
+         <div class="status-dot" style="background:#2ecc71;"></div>
+         <span>Connected: ${enriched.operator}${timeDisplay}</span>
+         <button class="icon-btn-sm btn-copy-tracker-driver" style="margin-left: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; padding: 4px; vertical-align: middle;">
+           <svg class="icon-xs" style="fill: var(--green);"><use href="#icon-clipboard"/></svg>
+         </button>
+       `;
+       
+       const copyBtn = statusBadge.querySelector('.btn-copy-tracker-driver');
+       if (copyBtn) {
+         copyBtn.onclick = (e) => {
+           e.stopPropagation();
+           copyToClipboard(enriched.operator, copyBtn);
+         };
+       }
        
        const context = SamsaraEngine.resolveRouteContext(enriched, SamsaraEngine.CONFIG.STOPS);
        document.getElementById('tracker-last-stop').parentElement.querySelector('.stat-label').textContent = 'LAST STOP';
@@ -1770,25 +1874,19 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Enter') {
-    console.log("Enter key pressed");
     if (modal) { 
       const btn = modal.querySelector('.btn-primary'); 
-      if (btn) {
-        console.log("Triggering modal primary button");
-        btn.click(); 
-        return; 
-      }
+      if (btn) { btn.click(); return; }
     }
+    // Fallback for login screen
     if (views['login'] && views['login'].classList.contains('active')) { 
-      console.log("Triggering login from Enter key");
       doLogin(); 
-      return; 
     }
   }
 });
 
 // ===== INIT =====
-console.log("Topview Logger V1.3.0 initializing...");
+console.log("Topview Logger V10.0.0 initializing...");
 initTimePicker();
 updateStorageCount();
 
@@ -1799,4 +1897,4 @@ if (portalSessionCookie) {
   fetchDispatchData(); 
 }
 
-console.log("Topview Logger V1.3.0 operational.");
+console.log("Topview Logger V10.0.0 operational.");

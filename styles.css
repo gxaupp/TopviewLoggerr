@@ -682,3 +682,28 @@ button:active { transform: scale(.92) !important; background: rgba(255,255,255,0
 .portal-action-btn:active {
   transform: scale(0.98);
 }
+
+/* === COPY FEEDBACK GLOW === */
+.copy-glow-green {
+  animation: copy-glow-anim 0.8s ease-out;
+}
+
+@keyframes copy-glow-anim {
+  0% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); background: rgba(46, 204, 113, 0.3); }
+  100% { box-shadow: 0 0 20px 10px rgba(46, 204, 113, 0); background: transparent; }
+}
+
+.copy-glow-green {
+  animation: copy-pulse-green 1s ease-out;
+  background: var(--green) !important;
+  border-color: var(--green) !important;
+}
+.copy-glow-green svg {
+  fill: white !important;
+}
+
+@keyframes copy-pulse-green {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); }
+  50% { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(46, 204, 113, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+}

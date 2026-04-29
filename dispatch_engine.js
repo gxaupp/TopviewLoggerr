@@ -32,10 +32,13 @@ class DispatchEngine {
     };
     const targetId = normalize(busId);
     
-    // Filter records for this bus using normalized IDs
+    // Filter records for this bus using normalized IDs + 24h recency
+    const now = new Date();
     const matches = dispatchRecords.filter(r => {
-      if (!r.bus) return false;
-      return normalize(r.bus) === targetId;
+      if (!r.bus || !r.date) return false;
+      const recordDate = new Date(r.date);
+      const diffHrs = (now - recordDate) / (1000 * 60 * 60);
+      return normalize(r.bus) === targetId && diffHrs <= 24;
     });
     
     if (matches.length === 0) {
