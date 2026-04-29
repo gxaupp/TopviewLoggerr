@@ -53,6 +53,7 @@ class SamsaraEngine {
    * @param {string} vehicleId - The specific Samsara ID of the bus
    * @param {string} accessToken - The Samsara API Token
    * @returns {Promise<{latitude: number, longitude: number, heading: number, speed: number}>}
+   */
   static async fetchBusLocation(vehicleId, accessToken) {
     const PROXY_URL = 'https://topviewloggerr.onrender.com/api/samsara/proxy';
     const getTunnelUrl = (url) => `${PROXY_URL}?url=${encodeURIComponent(url)}&key=${encodeURIComponent(accessToken)}`;
