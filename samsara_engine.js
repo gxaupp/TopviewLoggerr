@@ -58,7 +58,11 @@ class SamsaraEngine {
     // Stage 1: Resolve name to ID
     const timestamp = Date.now();
     let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    // Use bridge ONLY on localhost web browser, NOT on native IPA
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const isWeb = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+    
+    if (isLocalhost && isWeb) {
       listUrl = 'https://corsproxy.io/?' + encodeURIComponent(listUrl);
     }
 
@@ -254,7 +258,10 @@ class SamsaraEngine {
     let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
     let locUrl = `https://api.samsara.com/fleet/vehicles/locations?_cb=${timestamp}`;
     
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const isWeb = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+
+    if (isLocalhost && isWeb) {
       listUrl = 'https://corsproxy.io/?' + encodeURIComponent(listUrl);
       locUrl = 'https://corsproxy.io/?' + encodeURIComponent(locUrl);
     }
