@@ -299,11 +299,19 @@ app.get('/api/samsara/proxy', async (req, res) => {
       }
     });
 
-    const data = await samsaraRes.json();
-    return res.status(samsaraRes.status).json(data);
+    const contentType = samsaraRes.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await samsaraRes.json();
+      return res.status(samsaraRes.status).json(data);
+    } else {
+      // If Samsara returns HTML (like a maintenance page), pass the text through
+      const textData = await samsaraRes.text();
+      console.warn('[SamsaraTunnel] Non-JSON response received from Samsara.');
+      return res.status(samsaraRes.status).send(textData);
+    }
   } catch (err) {
-    console.error('[SamsaraTunnel] Error:', err);
-    return res.status(500).json({ success: false, message: err.message });
+    console.error('[SamsaraTunnel] Proxy Crash:', err);
+    return res.status(502).json({ success: false, message: 'Tunnel failed to reach Samsara: ' + err.message });
   }
 });
 

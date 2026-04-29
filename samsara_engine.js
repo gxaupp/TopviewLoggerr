@@ -72,6 +72,10 @@ class SamsaraEngine {
         console.error(`[Samsara] HTTP ${listRes.status} Error:`, errText);
         throw new Error(listRes.status === 401 ? 'Invalid API Token' : `Samsara Discovery Error: ${listRes.status} (Forbidden)`);
       }
+      const contentType = listRes.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`Samsara Service Degraded: ${listRes.status}`);
+      }
 
       const listData = await listRes.json();
       const vehicles = listData.data || [];
