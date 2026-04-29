@@ -710,13 +710,7 @@
 </div>
 
 <script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('Service Worker registered:', reg.scope))
-      .catch(err => console.log('Service Worker orientation failed:', err));
-  });
-}
+<!-- Service worker registration removed to prevent cache loops -->
 </script>
 <!-- Removed duplicate script tags handled by ESM imports in app.js -->
 <script type="module" src="app.js?v=v1_3_features"></script>
