@@ -318,6 +318,12 @@ if (loginBtn) {
     document.getElementById('menu-welcome').textContent = `Hello, ${saved}`;
     loadAllData();
     showView('menu');
+
+    // PRE-FETCH: Start scanning dispatch data immediately so it's ready for the tracker
+    if (localStorage.getItem('portal_session_cookie')) {
+      console.log('[AutoLogin] Pre-fetching dispatch data for instant DR...');
+      setTimeout(() => fetchDispatchData(), 1000);
+    }
     
     // AUTO-CONNECT: Background CountIf link
     console.log("[AutoLogin] Triggering background CountIf link...");
@@ -560,6 +566,7 @@ function countifSetBadge(text, color) {
 
 let portalSessionCookie = localStorage.getItem('portal_session_cookie');
 let portalData = [];
+let portalLastSync = 0; // Timestamp of last successful dispatch sync
 
 async function fetchDispatchData(contextLabel = 'Data') {
   if (!portalSessionCookie) return;
@@ -593,6 +600,7 @@ async function fetchDispatchData(contextLabel = 'Data') {
         const diffHrs = (now - recordDate) / (1000 * 60 * 60);
         return diffHrs <= 24;
       });
+      portalLastSync = Date.now();
       console.log(`[Portal] Synced ${portalData.length} records (24h filter) for "${contextLabel}"`);
       
       if (portalData.length === 0) {
@@ -943,12 +951,7 @@ document.getElementById('btn-run-tracker').addEventListener('click', async () =>
        // ENRICHMENT: Link with CountIf data
        let enriched = DispatchEngine.getEnrichedStatus(busGps, busId, portalData);
        
-       // DEEP SEARCH FALLBACK: If unknown, try a targeted search for this specific bus
-       if (enriched.operator === 'Unknown Driver' && portalSessionCookie) {
-         statusBadge.innerHTML = `<div class="status-dot" style="background:#f1c40f;"></div><span>Deep Searching Dispatch...</span>`;
-         await fetchDispatchData(busId); // This updates portalData with results for this bus
-         enriched = DispatchEngine.getEnrichedStatus(busGps, busId, portalData);
-       }
+       // Deep Search disabled — use refresh button to manually sync dispatch data
        
        statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
        statusBadge.style.color = '#2ecc71';
