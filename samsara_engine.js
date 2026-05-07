@@ -57,10 +57,10 @@ class SamsaraEngine {
   static async fetchBusLocation(vehicleId, accessToken) {
     // Stage 1: Resolve name to ID
     const timestamp = Date.now();
-    let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      listUrl = 'https://corsproxy.io/?' + encodeURIComponent(listUrl);
-    }
+    const baseUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
+      && (!window.Capacitor || !window.Capacitor.isNative) ? '/samsara-api' : 'https://api.samsara.com';
+    let listUrl = `${baseUrl}/fleet/vehicles?_cb=${timestamp}`;
+    // Native CapacitorHttp handles CORS on iOS.
 
     try {
       const listRes = await fetch(listUrl, {
@@ -97,10 +97,8 @@ class SamsaraEngine {
 
       // Stage 2: Fetch HIGH-PRECISION location for ID
       const cacheBust = `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
-      let locUrl = `https://api.samsara.com/fleet/vehicles/locations?vehicleIds=${vehicleEntry.id}&_cb=${cacheBust}`;
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        locUrl = 'https://corsproxy.io/?' + encodeURIComponent(locUrl);
-      }
+      let locUrl = `${baseUrl}/fleet/vehicles/locations?vehicleIds=${vehicleEntry.id}&_cb=${cacheBust}`;
+      // Native CapacitorHttp handles CORS on iOS.
 
       const locRes = await fetch(locUrl, {
         method: 'GET',
@@ -239,13 +237,12 @@ class SamsaraEngine {
    */
   static async findBusesNearStop(lat, lng, accessToken, limit = 3) {
     const timestamp = Date.now();
-    let listUrl = `https://api.samsara.com/fleet/vehicles?_cb=${timestamp}`;
-    let locUrl = `https://api.samsara.com/fleet/vehicles/locations?_cb=${timestamp}`;
+    const baseUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
+      && (!window.Capacitor || !window.Capacitor.isNative) ? '/samsara-api' : 'https://api.samsara.com';
+    let listUrl = `${baseUrl}/fleet/vehicles?_cb=${timestamp}`;
+    let locUrl = `${baseUrl}/fleet/vehicles/locations?_cb=${timestamp}`;
     
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      listUrl = 'https://corsproxy.io/?' + encodeURIComponent(listUrl);
-      locUrl = 'https://corsproxy.io/?' + encodeURIComponent(locUrl);
-    }
+    // Native CapacitorHttp handles CORS on iOS.
 
     try {
       // 1. Fetch Fleet Roster to get Names mapping
