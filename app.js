@@ -334,7 +334,7 @@ document.getElementById('btn-goto-fullloop').addEventListener('click', () => { S
 
 // ===== TRACKER MODULE =====
 const DEFAULTS = {
-  SAMSARA_API: 'samsara_api_WVlYNWsGXwAnZdlNiqWuCHrHsXA7wn'
+  SAMSARA_API: 'samsara_api_GhW9yDVbDjH8nA2uBD6F5ccMaNs9rH'
 };
 
 let trackerMap = null;
