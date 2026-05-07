@@ -57,8 +57,8 @@ class SamsaraEngine {
   static async fetchBusLocation(vehicleId, accessToken) {
     // Stage 1: Resolve name to ID
     const timestamp = Date.now();
-    const baseUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
-      && (!window.Capacitor || !window.Capacitor.isNative) ? '/samsara-api' : 'https://api.samsara.com';
+    const baseUrl = (window.location.port === '5173' || window.location.port === '3000') 
+      ? '/samsara-api' : 'https://api.samsara.com';
     let listUrl = `${baseUrl}/fleet/vehicles?_cb=${timestamp}`;
     // Native CapacitorHttp handles CORS on iOS.
 
@@ -237,8 +237,8 @@ class SamsaraEngine {
    */
   static async findBusesNearStop(lat, lng, accessToken, limit = 3) {
     const timestamp = Date.now();
-    const baseUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
-      && (!window.Capacitor || !window.Capacitor.isNative) ? '/samsara-api' : 'https://api.samsara.com';
+    const baseUrl = (window.location.port === '5173' || window.location.port === '3000') 
+      ? '/samsara-api' : 'https://api.samsara.com';
     let listUrl = `${baseUrl}/fleet/vehicles?_cb=${timestamp}`;
     let locUrl = `${baseUrl}/fleet/vehicles/locations?_cb=${timestamp}`;
     
