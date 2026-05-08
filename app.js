@@ -1540,8 +1540,7 @@ function flRenderLog() {
     li.className = 'log-item';
     let label = v.type;
     // Show standing action status
-    if (v.standingAction === 'taken') label += ` (Action Taken)`;
-    else if (v.standingAction === 'none') label += ` (No Action Taken)`;
+    // Standing action status labels removed per user request for cleaner reports
     li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${v.notes ? `<span class="log-notes">${v.notes}</span>` : ''}${v.actionDescription ? `<span class="log-notes" style="color:var(--accent);">${v.actionDescription}</span>` : ''}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm fl-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
     li.querySelector('.fl-edit-log').onclick = () => openViolationDetail('fl', v.type, idx);
     li.querySelector('.fl-del-log').onclick = () => {
@@ -1599,10 +1598,8 @@ function flGenerateReport(s) {
         const isStanding = type.toLowerCase().includes('standing');
         const times = groups[type].map(v => {
           let extra = '';
-          if (isStanding && v.standingAction === 'taken') {
-            extra = ` (Action Taken${v.actionDescription ? ',' + v.actionDescription : ''})`;
-          } else if (isStanding && v.standingAction === 'none') {
-            extra = ` (No Action Taken)`;
+          if (isStanding && v.standingAction === 'taken' && v.actionDescription) {
+            extra = ` (${v.actionDescription})`;
           } else if (v.notes) {
             extra = ` (${v.notes})`;
           }
