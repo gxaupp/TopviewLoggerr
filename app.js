@@ -1639,7 +1639,7 @@ function flGenerateReport(s) {
         }
         return `${formatReportTime(v.timestamp)}${extra}`;
       });
-      r += `[${times.join(', ')}] || ${type} // "Bus:" ${s.busNumber}, "Bus Driver:" ${s.driverName}\n`;
+      r += `[${times.join(', ')}] || ${type} // Bus: ${s.busNumber}, Bus Driver: ${s.driverName}\n`;
     });
   }
 
