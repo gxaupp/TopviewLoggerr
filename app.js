@@ -1618,6 +1618,31 @@ function flGenerateReport(s) {
     r += `------\n`;
     notes.forEach(n => { r += `${n}\n`; });
   }
+
+  // Copyables section for video violations
+  const videoViolations = s.violations.filter(v => v.hasVideo);
+  if (videoViolations.length > 0) {
+    r += `\n\nCOPYABLES:\n`;
+    r += `----------\n`;
+    const vGroups = {};
+    [...videoViolations].sort((a,b) => a.sortMinutes - b.sortMinutes).forEach(v => {
+      if (!vGroups[v.type]) vGroups[v.type] = [];
+      vGroups[v.type].push(v);
+    });
+    Object.keys(vGroups).forEach(type => {
+      const times = vGroups[type].map(v => {
+        let extra = '';
+        if (v.standingAction === 'taken') {
+          extra = v.actionDescription ? ` (${v.actionDescription})` : ``;
+        } else if (v.notes) {
+          extra = ` (${v.notes})`;
+        }
+        return `${formatReportTime(v.timestamp)}${extra}`;
+      });
+      r += `[${times.join(', ')}] || ${type} // "Bus:" ${s.busNumber}, "Bus Driver:" ${s.driverName}\n`;
+    });
+  }
+
   return r;
 }
 
@@ -1733,6 +1758,7 @@ const radioNoAction = document.getElementById('radio-no-action');
 const radioActionTaken = document.getElementById('radio-action-taken');
 const actionDescInput = document.getElementById('action-description-input');
 const actionDescGroup = document.getElementById('action-desc-group');
+const checkHasVideo = document.getElementById('check-has-video');
 
 // Radio mutual exclusivity + show/hide text input
 if (radioNoAction && radioActionTaken) {
@@ -1775,11 +1801,13 @@ function openViolationDetail(mod, type, editIdx = null) {
     radioActionTaken.checked = isEdit && existing.standingAction === 'taken' || false;
     actionDescInput.value = (isEdit && existing.actionDescription) || '';
     actionDescGroup.style.display = radioActionTaken.checked ? 'block' : 'none';
+    if (checkHasVideo) checkHasVideo.checked = (isEdit && existing.hasVideo) || false;
   } else {
     standingActionOpts.style.display = 'none';
     radioNoAction.checked = false; radioActionTaken.checked = false;
     actionDescInput.value = '';
     actionDescGroup.style.display = 'none';
+    if (checkHasVideo) checkHasVideo.checked = false;
   }
   detailModal.classList.add('active');
   detailModal.dataset.currentType = type;
@@ -1787,7 +1815,7 @@ function openViolationDetail(mod, type, editIdx = null) {
 }
 
 detailTime.addEventListener('click', () => openTimePicker(detailTime.value, v => detailTime.value = v));
-document.getElementById('btn-cancel-detail').addEventListener('click', () => { detailModal.classList.remove('active'); checkLate.checked = false; checkNoInput.checked = false; radioNoAction.checked = false; radioActionTaken.checked = false; });
+document.getElementById('btn-cancel-detail').addEventListener('click', () => { detailModal.classList.remove('active'); checkLate.checked = false; checkNoInput.checked = false; radioNoAction.checked = false; radioActionTaken.checked = false; if (checkHasVideo) checkHasVideo.checked = false; });
 document.getElementById('btn-save-detail').addEventListener('click', () => {
   const state = State[detailModule];
   const idx = state.editingViolationIndex;
@@ -1811,11 +1839,13 @@ document.getElementById('btn-save-detail').addEventListener('click', () => {
       violation.standingAction = '';
       violation.actionDescription = '';
     }
+    violation.hasVideo = checkHasVideo ? checkHasVideo.checked : false;
   }
   if (idx === null) state.session.violations.push(violation);
   else state.session.violations[idx] = violation;
   checkLate.checked = false; checkNoInput.checked = false;
   radioNoAction.checked = false; radioActionTaken.checked = false;
+  if (checkHasVideo) checkHasVideo.checked = false;
   detailModal.classList.remove('active');
   state.editingViolationIndex = null;
   if (detailModule === 'sw') { swRenderLog(); swSaveSession(); }
