@@ -1135,6 +1135,11 @@ function openReportViewer(content, title) {
     if (line.match(/^[A-Z ]+:$/)) text.classList.add('header-line');
     if (line.match(/^[-=]+$/)) text.classList.add('separator-line');
     text.textContent = line || ' ';
+    
+    const btnContainer = document.createElement('div');
+    btnContainer.style.display = 'flex';
+    btnContainer.style.gap = '0.5rem';
+
     const btn = document.createElement('button');
     btn.className = 'btn-copy-line';
     btn.innerHTML = '<svg class="icon-xs"><use href="#icon-clipboard"/></svg>';
@@ -1147,8 +1152,28 @@ function openReportViewer(content, title) {
       btn.classList.add('copied');
       setTimeout(() => btn.classList.remove('copied'), 1200);
     });
+    btnContainer.appendChild(btn);
+
+    if (line.startsWith('VIOLATIONS LOG (')) {
+      const btnAll = document.createElement('button');
+      btnAll.className = 'btn-copy-line';
+      btnAll.innerHTML = '<span style="font-weight:bold;font-size:0.8rem;line-height:1;">A</span>';
+      btnAll.title = "Copy Entire Violations Log";
+      btnAll.addEventListener('click', () => {
+        const match = currentReportText.match(/VIOLATIONS LOG \(\d+\)\n-+\n([\s\S]*?)(?:\n\nNOTES:|\n\nCOPYABLES:|$)/);
+        const logContent = match ? match[1].trim() : '';
+        const ta = document.createElement('textarea');
+        ta.value = logContent; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+        document.body.removeChild(ta);
+        btnAll.classList.add('copied');
+        setTimeout(() => btnAll.classList.remove('copied'), 1200);
+      });
+      btnContainer.appendChild(btnAll);
+    }
+
     row.appendChild(text);
-    if (line.trim()) row.appendChild(btn);
+    if (line.trim()) row.appendChild(btnContainer);
     body.appendChild(row);
   });
   document.getElementById('report-viewer-modal').classList.add('active');
