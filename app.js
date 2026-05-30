@@ -1539,9 +1539,18 @@ function flRenderLog() {
     const li = document.createElement('li');
     li.className = 'log-item';
     let label = v.type;
-    // Show standing action status
-    if (v.standingAction === 'none') label += ` (No Action Taken)`;
-    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${v.notes ? `<span class="log-notes">${v.notes}</span>` : ''}${v.actionDescription ? `<span class="log-notes" style="color:var(--accent);">${v.actionDescription}</span>` : ''}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm fl-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    let parts = [];
+    if (v.notes) parts.push(v.notes);
+    if (isStandingType(v.type)) {
+      if (v.standingAction === 'taken') {
+        parts.push("Action Taken");
+        if (v.actionDescription) parts.push(v.actionDescription);
+      } else if (v.standingAction === 'none') {
+        parts.push("No Action Taken");
+      }
+    }
+    let notesHtml = parts.length > 0 ? `<span class="log-notes">(${parts.join(', ')})</span>` : '';
+    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${notesHtml}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm fl-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
     li.querySelector('.fl-edit-log').onclick = () => openViolationDetail('fl', v.type, idx);
     li.querySelector('.fl-del-log').onclick = () => {
       State.fl.session.violations.splice(idx, 1);
@@ -1597,14 +1606,17 @@ function flGenerateReport(s) {
       } else {
         const isStanding = type.toLowerCase().includes('standing');
         const times = groups[type].map(v => {
-          let extra = '';
-          if (isStanding && v.standingAction === 'taken') {
-            extra = v.actionDescription ? ` (${v.actionDescription})` : ``;
-          } else if (isStanding && v.standingAction === 'none') {
-            extra = ` (No Action Taken)`;
-          } else if (v.notes) {
-            extra = ` (${v.notes})`;
+          let parts = [];
+          if (v.notes) parts.push(v.notes);
+          if (isStanding) {
+            if (v.standingAction === 'taken') {
+              parts.push("Action Taken");
+              if (v.actionDescription) parts.push(v.actionDescription);
+            } else if (v.standingAction === 'none') {
+              parts.push("No Action Taken");
+            }
           }
+          let extra = parts.length > 0 ? ` (${parts.join(', ')})` : '';
           return `${formatReportTime(v.timestamp)}${extra}`;
         });
         r += `[${times.join(', ')}] || ${type}\n`;
@@ -1631,12 +1643,15 @@ function flGenerateReport(s) {
     });
     Object.keys(vGroups).forEach(type => {
       const times = vGroups[type].map(v => {
-        let extra = '';
+        let parts = [];
+        if (v.notes) parts.push(v.notes);
         if (v.standingAction === 'taken') {
-          extra = v.actionDescription ? ` (${v.actionDescription})` : ``;
-        } else if (v.notes) {
-          extra = ` (${v.notes})`;
+          parts.push("Action Taken");
+          if (v.actionDescription) parts.push(v.actionDescription);
+        } else if (v.standingAction === 'none') {
+          parts.push("No Action Taken");
         }
+        let extra = parts.length > 0 ? ` (${parts.join(', ')})` : '';
         return `${formatReportTime(v.timestamp)}${extra}`;
       });
       r += `[${times.join(', ')}] || ${type} // Bus: ${s.busNumber}, Bus Driver: ${s.driverName}\n`;
